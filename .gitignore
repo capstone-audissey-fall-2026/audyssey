@@ -304,8 +304,6 @@ cython_debug/
 .omx/
 .agents/
 *.json
-!/langgraph.json
-.langgraph_api/
 
 # Local benchmark media and outputs
 data/

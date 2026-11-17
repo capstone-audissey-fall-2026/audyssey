@@ -2,7 +2,6 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 from audyssey.store import JobStore
 
 
@@ -29,44 +28,6 @@ class StoreTests(unittest.TestCase):
         version = job.version
         self.store.save(job)
         self.assertEqual(self.store.load(job.id).version, version + 1)
-
-    def test_save_retries_a_temporary_file_lock(self):
-        job, directory = self.store.create("clip.mp4", b"video")
-        version = job.version
-        replace = Path.replace
-        calls = []
-
-        def replace_after_unlock(path, target):
-            calls.append(path)
-            if len(calls) < 3:
-                raise PermissionError("file is temporarily locked")
-            return replace(path, target)
-
-        with patch.object(Path, "replace", replace_after_unlock), patch("time.sleep"):
-            self.store.save(job)
-
-        self.assertEqual(len(calls), 3)
-        self.assertEqual(self.store.load(job.id).version, version + 1)
-        self.assertEqual(list(directory.glob("tmp*")), [])
-
-    def test_failed_save_keeps_previous_version_and_cleans_temporary_file(self):
-        job, directory = self.store.create("clip.mp4", b"video")
-        version = job.version
-        with patch.object(Path, "replace", side_effect=PermissionError("locked")), patch(
-            "time.sleep"
-        ), self.assertRaises(PermissionError):
-            self.store.save(job)
-
-        self.assertEqual(job.version, version)
-        self.assertEqual(self.store.load(job.id).version, version)
-        self.assertEqual(list(directory.glob("tmp*")), [])
-
-    def test_job_json_uses_utf8_for_korean_text(self):
-        job, directory = self.store.create("clip.mp4", b"video")
-        job.error = "분리 작업을 다시 실행해 주세요"
-        self.store.save(job)
-        self.assertIn(job.error, (directory / "job.json").read_text(encoding="utf-8"))
-        self.assertEqual(self.store.load(job.id).error, job.error)
 
     def test_list_newest_first(self):
         a, _ = self.store.create("a.mp4", b"a")

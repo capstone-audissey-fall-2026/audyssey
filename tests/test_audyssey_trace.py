@@ -59,6 +59,5 @@ class CallTests(unittest.TestCase):
     def test_describe_keeps_models_and_outside_paths(self):
         plan = SourcePlan(name="dog", kind="sfx", description="bark")
         self.assertEqual(trace.describe([plan], self.root)[0]["name"], "dog")
-        outside = Path("/elsewhere.wav")
-        self.assertEqual(trace.describe(outside, self.root), str(outside))
+        self.assertEqual(trace.describe(Path("/elsewhere.wav"), self.root), "/elsewhere.wav")
         self.assertEqual(trace.describe(self.root / "missing.wav", self.root), str(self.root / "missing.wav"))

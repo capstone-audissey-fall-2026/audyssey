@@ -332,37 +332,6 @@ LANGSMITH_PROJECT=audyssey
 - 오디오·영상·프레임 데이터와 키·토큰은 올리지 않습니다. 파일 경로와 메타데이터만 남깁니다.
 - 플래너 LLM 기록에는 모델명과 토큰 사용량만 남습니다. 이미지가 든 프롬프트와 응답 원문은 남기지 않습니다.
 
-### Studio에서 그래프 보기
-
-`langgraph.json`의 `audyssey` 그래프는 `src/audyssey/studio.py:graph`를 사용합니다.
-API의 `analyze()`와 Studio는 같은 `build_graph()`로 생성한 그래프를 실행합니다.
-`prepare`에서 작업을 읽고, 전처리·계획·검증·음원 처리·residual을 거쳐 `finish`에서 최종 상태를 저장합니다.
-
-1. 프로젝트 루트에서 `.env`의 LangSmith 키와 실행 모드를 설정합니다. Studio는 `langgraph.json`에 지정한 `.env`를 읽습니다. 첫 연결을 stub으로 확인하려면 다음 값을 사용합니다.
-   ```dotenv
-   AUDYSSEY_PLANNER=stub
-   AUDYSSEY_SEPARATOR=stub
-   AUDYSSEY_FILTER=stub
-   AUDYSSEY_GROUNDER=stub
-   AUDYSSEY_GENERATOR=stub
-   AUDYSSEY_VISUAL_PROMPT=false
-   ```
-2. 앱을 실행하고 영상을 업로드합니다.
-   ```powershell
-   uv run --locked --env-file .env --extra ui --extra llm audyssey serve
-   ```
-   전처리가 끝나면 `/api/jobs` 응답에서 해당 작업의 `id`를 확인합니다.
-3. 별도 터미널에서 Studio 개발 서버를 실행합니다. CLI와 Agent Server는 uv의 임시 환경에 설치됩니다.
-   ```powershell
-   uv run --locked --extra ui --extra llm --with "langgraph-cli[inmem]==0.4.43" --with "langgraph-api==0.18.1" langgraph dev
-   ```
-4. 출력된 Studio 주소를 열고 `audyssey`를 선택합니다. 기본 Agent Server 주소는 `http://127.0.0.1:2024`입니다. Graph 입력에 업로드한 작업 ID를 넣습니다.
-   ```json
-   {"job_id": "업로드한 12자리 작업 ID", "method": "separate"}
-   ```
-   `method`가 `null`이면 전처리하고, `"generate"`이면 생성 경로를 실행합니다. 무음 영상은 생성 경로를 사용합니다.
-5. 실행 경로와 노드별 상태를 확인합니다. API와 Studio의 `AUDYSSEY_WORK_DIR`를 같게 설정하고, 한 작업의 실행이 끝난 뒤 다음 실행이나 앱 편집을 시작합니다.
-
 ## 가중치 준비
 
 - 가중치는 레포와 이미지에 들어 있지 않습니다.

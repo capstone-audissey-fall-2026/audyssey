@@ -49,7 +49,7 @@ class Call:
         path = self.directory / "trace" / self.id / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
-        return path.relative_to(self.directory).as_posix()
+        return str(path.relative_to(self.directory))
 
 
 def current() -> Call | None:
@@ -68,7 +68,7 @@ def describe(value: Any, directory: Path, call: Call | None = None) -> Any:
             return str(value)
         if call is not None:
             return {"file": call.save(path.name, path.read_bytes())}
-        return {"file": path.relative_to(directory).as_posix()}
+        return {"file": str(path.relative_to(directory))}
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
     if isinstance(value, (list, tuple)):

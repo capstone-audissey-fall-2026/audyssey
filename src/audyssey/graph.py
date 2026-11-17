@@ -3,12 +3,10 @@ from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
 from typing import Literal
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 
 from langsmith import traceable
 from langgraph.graph import END, START, StateGraph
-from langgraph.graph.state import CompiledStateGraph
-from pydantic import BaseModel, Field
 
 from audyssey import trace
 from audyssey.contracts import (
@@ -30,7 +28,7 @@ from audyssey.contracts import (
 from audyssey.media import compute_peaks, extract_audio, is_silent, probe, write_silence
 from audyssey.settings import Settings
 from audyssey.store import JobStore
-from audyssey.tools import Tools, load_tools
+from audyssey.tools import Tools
 from audyssey.tools.editing.render import compute_residual, render
 
 
@@ -176,7 +174,7 @@ def generate_source(job: Job, source: Source, ctx: Context) -> None:
             raise RuntimeError("generation produced no track")
         final = directory / f"tracks/{source.id}.wav"
         best_path.replace(final)
-        source.track_path = final.relative_to(directory).as_posix()
+        source.track_path = str(final.relative_to(directory))
         source.filter = best_result
         source.status = "done"
     except Exception as exc:
@@ -237,7 +235,7 @@ def process_source(job: Job, source: Source, ctx: Context) -> None:
                 directory / f"tracks/{source.id}.wav",
                 source.attempts,
             )
-            source.track_path = path.relative_to(directory).as_posix()
+            source.track_path = str(path.relative_to(directory))
             update_step(
                 job,
                 ctx,
@@ -302,16 +300,10 @@ def process_source(job: Job, source: Source, ctx: Context) -> None:
     ctx.store.save(job)
 
 
-class AnalysisInput(BaseModel):
-    job_id: str = ""
-    job: Job | None = None
-    method: Literal["separate", "generate"] | None = "separate"
-
-
-class AnalysisState(BaseModel):
+@dataclass
+class AnalysisState:
     job: Job
-    method: Literal["separate", "generate"] | None = "separate"
-    issues: list[PlanIssue] = Field(default_factory=list)
+    issues: list[PlanIssue] = field(default_factory=list)
     round: int = 0
 
 
@@ -336,48 +328,32 @@ def refresh_residual(job: Job, ctx: Context) -> None:
     update_step(job, ctx, StepStatus(key="residual", status="done"))
 
 
-def build_graph(
-    ctx: Context | None = None,
-    *,
+def analyze(
+    job: Job,
+    ctx: Context,
     on_finish: Callable[[], None] = lambda: None,
-) -> CompiledStateGraph:
-    """Build a reusable analysis graph without starting a job or loading models.
+    method: Literal["separate", "generate"] | None = "separate",
+) -> Job:
+    """Run the analysis graph. on_finish runs before the final state is saved.
 
-    Inputs accept either a stored job_id or a live/serialized Job. Each invocation
-    owns its job state; only tools, settings and the store are shared.
+    method=None only preprocesses and leaves the job "new"; a later call with a
+    method skips preprocessing and plans. Silent videos always generate.
     """
-    if ctx is None:
-        settings = Settings()
-        ctx = Context(load_tools(settings), settings, JobStore(settings.work_dir))
-    context = ctx
-
-    def prepare(state: AnalysisInput) -> dict:
-        job = context.store.load(state.job_id) if state.job_id else state.job
-        if job is None:
-            raise ValueError("job_id or job is required")
-        job.state, job.error = "running", None
-        if state.method is not None:
-            job.method = "generate" if job.silent else state.method
-        return {"job": job, "method": state.method, "issues": [], "round": 0}
-
-    def job_context(job: Job) -> Context:
-        directory = context.store.dir(job.id)
-        return replace(
-            context,
-            tools=trace.wrap_tools(context.tools, directory, context.settings),
-        )
+    directory = ctx.store.dir(job.id)
+    if method is not None:
+        job.method = "generate" if job.silent else method
+    ctx = replace(ctx, tools=trace.wrap_tools(ctx.tools, directory, ctx.settings))
+    active_key = "preprocess"
 
     def preprocess(state: AnalysisState) -> dict:
-        job = state.job
-        directory = context.store.dir(job.id)
         update_step(job, ctx, StepStatus(key="preprocess", status="running"))
         video = {"video": trace.describe(directory / job.video_path, directory)}
         with trace.step(directory, "preprocess", video) as record:
-            extract(job, directory, record)
+            extract(record)
         update_step(job, ctx, StepStatus(key="preprocess", status="done"))
-        return {"job": job}
+        return {}
 
-    def extract(job: Job, directory: Path, record: trace.Call) -> None:
+    def extract(record: trace.Call) -> None:
         duration, channels = probe(directory / job.video_path)
         job.duration = duration
         if channels == 0:
@@ -408,9 +384,8 @@ def build_graph(
         }
 
     def plan(state: AnalysisState) -> dict:
-        job = state.job
-        ctx = job_context(job)
-        directory = ctx.store.dir(job.id)
+        nonlocal active_key
+        active_key = "plan"
         round_number = state.round + 1
         update_step(
             job,
@@ -432,7 +407,6 @@ def build_graph(
             job.duration,
         )
         previous = {source.plan.name: source for source in job.sources}
-        origin = "generated" if job.silent or job.method == "generate" else "separated"
         sources = []
         for i, plan_item in enumerate(plans, 1):
             source = previous.get(plan_item.name)
@@ -440,14 +414,12 @@ def build_graph(
                 source = Source(
                     id=f"s{i}",
                     plan=plan_item,
-                    origin=origin,
+                    origin="generated"
+                    if job.silent or job.method == "generate"
+                    else "separated",
                 )
             else:
                 source.id, source.plan = f"s{i}", plan_item
-                if source.origin != origin:
-                    source.origin, source.status = origin, "pending"
-                    source.attempts = 0
-                    source.track_path, source.filter = None, None
             sources.append(source)
         job.sources = sources
         update_step(
@@ -460,12 +432,10 @@ def build_graph(
                 max_rounds=ctx.settings.max_plan_rounds,
             ),
         )
-        return {"job": job, "issues": issues, "round": round_number}
+        return {"issues": issues, "round": round_number}
 
     def validate(state: AnalysisState) -> dict:
-        job = state.job
-        ctx = job_context(job)
-        directory = ctx.store.dir(job.id)
+        nonlocal active_key
         active_key = "validate_plan"
         update_step(
             job,
@@ -523,46 +493,23 @@ def build_graph(
                     message="; ".join(i.message for i in issues),
                 ),
             )
-        return {"job": job, "issues": issues}
+        return {"issues": issues}
 
     def separate(state: AnalysisState) -> dict:
-        job = state.job
-        ctx = job_context(job)
+        nonlocal active_key
+        active_key = "separate"
         # ponytail: sequential per-source loop, fan out with Send when real GPU tools need parallelism
         for source in job.sources:
             process_source(job, source, ctx)
-        return {"job": job}
+        return {}
 
     def residual(state: AnalysisState) -> dict:
-        refresh_residual(state.job, context)
-        return {"job": state.job}
+        nonlocal active_key
+        active_key = "residual"
+        refresh_residual(job, ctx)
+        return {}
 
-    def finish(state: AnalysisState) -> dict:
-        on_finish()
-        job = state.job
-        job.state = "new" if state.method is None else "ready"
-        context.store.save(job)
-        return {"job": job}
-
-    def guarded(name: str, node: Callable[[AnalysisState], dict]) -> Callable:
-        @wraps(node)
-        def run(state: AnalysisState) -> dict:
-            try:
-                return node(state)
-            except Exception as exc:
-                on_finish()
-                job = state.job
-                job.state, job.error = "failed", str(exc)
-                key = "validate_plan" if name == "validate" else name
-                update_step(
-                    job, context, StepStatus(key=key, status="failed", message=str(exc))
-                )
-                raise
-
-        return run
-
-    builder = StateGraph(AnalysisState, input_schema=AnalysisInput)
-    builder.add_node("prepare", prepare)
+    builder = StateGraph(AnalysisState)
     for name, node in [
         ("preprocess", preprocess),
         ("plan", plan),
@@ -570,70 +517,49 @@ def build_graph(
         ("separate", separate),
         ("residual", residual),
     ]:
-        builder.add_node(name, guarded(name, node))
-    builder.add_node("finish", finish)
-    builder.add_edge(START, "prepare")
-    builder.add_conditional_edges(
-        "prepare",
-        lambda state: (
-            "preprocess" if state.method is None or not state.job.audio_path else "plan"
-        ),
-        ["preprocess", "plan"],
-    )
-    builder.add_conditional_edges(
-        "preprocess",
-        lambda state: "finish" if state.method is None else "plan",
-        ["finish", "plan"],
-    )
+        builder.add_node(name, node)
+    prepared = bool(job.audio_path)
+    if method is None:
+        builder.add_edge(START, "preprocess")
+        builder.add_edge("preprocess", END)
+    elif prepared:
+        builder.add_edge(START, "plan")
+    else:
+        builder.add_edge(START, "preprocess")
+    if method is not None and not prepared:
+        builder.add_edge("preprocess", "plan")
     builder.add_edge("plan", "validate")
     builder.add_conditional_edges(
         "validate",
         lambda state: (
             "plan"
-            if state.issues and state.round < context.settings.max_plan_rounds
+            if state.issues and state.round < ctx.settings.max_plan_rounds
             else "separate"
         ),
         ["plan", "separate"],
     )
     builder.add_edge("separate", "residual")
-    builder.add_edge("residual", "finish")
-    builder.add_edge("finish", END)
-    return builder.compile().with_config(
-        {"recursion_limit": 2 * context.settings.max_plan_rounds + 10}
-    )
-
-
-def analyze(
-    job: Job,
-    ctx: Context,
-    on_finish: Callable[[], None] = lambda: None,
-    method: Literal["separate", "generate"] | None = "separate",
-) -> Job:
-    """Run the shared graph and release the API lock before publishing completion."""
-    finished = False
-
-    def finish() -> None:
-        nonlocal finished
-        if not finished:
-            finished = True
-            on_finish()
-
+    builder.add_edge("residual", END)
+    error = None
     try:
-        build_graph(ctx, on_finish=finish).invoke(
-            {"job": job, "method": method},
+        builder.compile().invoke(
+            AnalysisState(job=job),
+            {"recursion_limit": 2 * ctx.settings.max_plan_rounds + 10},
         )
     except Exception as exc:
         error = str(exc)
-        finish()
-        if job.state != "failed" or job.error != error:
-            active_key = job.steps[-1].key if job.steps else "preprocess"
-            job.state, job.error = "failed", error
-            update_step(
-                job, ctx, StepStatus(key=active_key, status="failed", message=error)
-            )
+        update_step(
+            job, ctx, StepStatus(key=active_key, status="failed", message=error)
+        )
     finally:
-        finish()
-    return job
+        on_finish()
+    # Set the final state only now: the job object is shared, so any save after
+    # this line publishes it, and on_finish must already have run.
+    if error is None:
+        job.state = "new" if method is None else "ready"
+    else:
+        job.state, job.error = "failed", error
+    return ctx.store.save(job)
 
 
 def handle_command(job: Job, cmd: Command, ctx: Context) -> Job:
