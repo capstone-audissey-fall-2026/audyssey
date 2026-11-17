@@ -161,19 +161,37 @@ def create_app(settings: Settings | None = None, tools: Tools | None = None) -> 
         lanes = trace.lanes(settings)
         for lane in lanes:
             lane["up"] = None
+            if lane["id"] == "app":
+                lane["up"] = True
+                continue
             remote = [
                 urls[s][1] for s in lane["steps"] if urls.get(s, ("",))[0] == "remote"
             ]
+            headers = {}
+            timeout = 1
             if lane["id"].startswith("llm:"):
-                remote = [lane["id"].removeprefix("llm:")]
-            if lane["id"] == "app":
-                lane["up"] = True
+                endpoint = (
+                    settings.planner_endpoint()
+                    if "plan" in lane["steps"]
+                    else settings.validator_endpoint()
+                )
+                if not endpoint.base_url.strip():
+                    lane["up"] = False
+                    continue
+                path = "/key" if trace.is_openrouter(endpoint) else "/models"
+                url = endpoint.base_url.rstrip("/") + path
+                if endpoint.api_key:
+                    headers["Authorization"] = f"Bearer {endpoint.api_key}"
+                timeout = 3
             elif remote:
                 url = remote[0] if "://" in remote[0] else f"http://{remote[0]}"
-                try:
-                    lane["up"] = httpx.get(f"{url}/health", timeout=1).is_success
-                except httpx.HTTPError:
-                    lane["up"] = False
+                url = f"{url.rstrip('/')}/health"
+            else:
+                continue
+            try:
+                lane["up"] = httpx.get(url, headers=headers, timeout=timeout).is_success
+            except httpx.HTTPError:
+                lane["up"] = False
         return lanes
 
     @app.get("/api/jobs/{job_id}/trace")

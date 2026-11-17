@@ -265,6 +265,70 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(lanes[0]["steps"][0], "preprocess")
         self.assertEqual(lanes[0]["steps"][-1], "render")
 
+    def test_system_checks_openrouter_key_with_configured_url(self):
+        settings = Settings(
+            work_dir=self.root / "jobs",
+            planner="real",
+            planner_base_url="https://openrouter.ai/api/v1/",
+            planner_api_key="test-openrouter-key",
+        )
+        with TestClient(create_app(settings)) as client, patch(
+            "audyssey.api.httpx.get", return_value=httpx.Response(200)
+        ) as request:
+            response = client.get("/api/system")
+        lane = next(lane for lane in response.json() if "plan" in lane["steps"])
+        self.assertEqual((lane["name"], lane["up"]), ("OpenRouter", True))
+        request.assert_called_once_with(
+            "https://openrouter.ai/api/v1/key",
+            headers={"Authorization": "Bearer test-openrouter-key"},
+            timeout=3,
+        )
+        self.assertNotIn("test-openrouter-key", response.text)
+
+    def test_system_reports_rejected_openrouter_key(self):
+        settings = Settings(
+            work_dir=self.root / "jobs",
+            planner="real",
+            planner_base_url="https://openrouter.ai/api/v1",
+            planner_api_key="invalid-key",
+        )
+        with TestClient(create_app(settings)) as client, patch(
+            "audyssey.api.httpx.get", return_value=httpx.Response(401)
+        ):
+            response = client.get("/api/system")
+        lane = next(lane for lane in response.json() if "plan" in lane["steps"])
+        self.assertFalse(lane["up"])
+
+    def test_system_preserves_llm_scheme_base_path_and_authentication(self):
+        settings = Settings(
+            work_dir=self.root / "jobs",
+            planner="real",
+            planner_base_url="https://inference.example/proxy/v1",
+            planner_api_key="test-proxy-key",
+        )
+        with TestClient(create_app(settings)) as client, patch(
+            "audyssey.api.httpx.get", return_value=httpx.Response(200)
+        ) as request:
+            response = client.get("/api/system")
+        lane = next(lane for lane in response.json() if "plan" in lane["steps"])
+        self.assertTrue(lane["up"])
+        request.assert_called_once_with(
+            "https://inference.example/proxy/v1/models",
+            headers={"Authorization": "Bearer test-proxy-key"},
+            timeout=3,
+        )
+
+    def test_system_handles_unconfigured_llm_url(self):
+        settings = Settings(work_dir=self.root / "jobs", planner="real")
+        with TestClient(create_app(settings)) as client, patch(
+            "audyssey.api.httpx.get"
+        ) as request:
+            response = client.get("/api/system")
+        self.assertEqual(response.status_code, 200)
+        lane = next(lane for lane in response.json() if "plan" in lane["steps"])
+        self.assertFalse(lane["up"])
+        request.assert_not_called()
+
     def test_export_zips_render_outputs(self):
         import io
         import zipfile

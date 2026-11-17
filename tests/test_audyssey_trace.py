@@ -8,6 +8,20 @@ from audyssey.settings import Settings
 
 
 class LaneTests(unittest.TestCase):
+    def test_openrouter_is_named_for_its_provider(self):
+        for base_url in (
+            "https://openrouter.ai/api/v1",
+            "https://eu.openrouter.ai:443/api/v1",
+        ):
+            with self.subTest(base_url=base_url):
+                settings = Settings(
+                    planner="real",
+                    planner_base_url=base_url,
+                    planner_model="google/gemini-2.5-flash",
+                )
+                lane = next(lane for lane in trace.lanes(settings) if "plan" in lane["steps"])
+                self.assertEqual(lane["name"], "OpenRouter")
+
     def test_lanes_group_steps_by_server(self):
         settings = Settings(
             planner="real", planner_api="gemini", planner_input="video", planner_model="gemini-x",
