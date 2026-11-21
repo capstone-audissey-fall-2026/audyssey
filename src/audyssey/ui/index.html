@@ -1348,15 +1348,18 @@ function renderCall(c, open) {
 }
 function renderRequest(r) {
   const frames = r.media.filter((m) => m.kind === "image"), clips = r.media.filter((m) => m.kind === "video");
-  const how = r.input === "video" ? `영상 ${r.fps}fps${r.audio ? " + 오디오" : ""}` : `프레임 ${r.fps}fps`;
+  const audios = r.media.filter((m) => m.kind === "audio");
+  const how = r.input === "audio" ? "오디오 검수" : r.input === "video" ? `영상 ${r.fps}fps${r.audio ? " + 오디오" : ""}` : `프레임 ${r.fps}fps`;
   const source = (r.text.match(/^Source: (\{.*?\})\. /) || [])[1];
   let name = null;
   try { name = source && JSON.parse(source).name; } catch {}
+  try { name = JSON.parse(r.text).source?.name || name; } catch {}
   return [
     el("div", { class: "block" },
       el("div", { class: "block-head" }, el("span", { class: "tag in" }, "입력"), name ? el("b", { style: "color:var(--ink)" }, name) : null, el("span", {}, `${r.model.split("/").pop()}, ${how}${r.attempt > 1 ? `, 재요청 ${r.attempt}` : ""}`)),
       frames.length ? el("div", { class: "frames" }, frames.map((m) => el("figure", {}, el("img", { src: fileUrl(m.file), alt: m.label, loading: "lazy" }), el("figcaption", {}, m.label.replace(/^Frame at (.+) seconds$/, "$1s"))))) : null,
       clips.length ? el("div", { class: "clips" }, clips.map((m) => el("figure", {}, el("video", { src: fileUrl(m.file), controls: true, preload: "metadata", playsinline: true }), el("figcaption", {}, m.label.replace(/^Video from (.+) to (.+) seconds$/, "$1–$2s"))))) : null,
+      audios.length ? el("div", { class: "clips" }, audios.map((m) => el("figure", {}, el("audio", { src: fileUrl(m.file), controls: true, preload: "metadata" }), el("figcaption", {}, m.label)))) : null,
       el("pre", {}, r.text),
       el("details", { class: "sub" }, el("summary", {}, "프롬프트"), el("pre", { style: "margin-top:6px" }, r.system))),
     el("div", { class: "block" },

@@ -25,14 +25,19 @@ class PlannerRealTests(unittest.TestCase):
         self.image.write_bytes(b"\xff\xd8test-jpeg")
         self.video, self.audio = self.root / "video.mp4", self.root / "audio.wav"
         self.video.write_bytes(b"private-video-bytes")
-        self.audio.write_bytes(b"private-audio-bytes")
+        import numpy as np
+        from audyssey.media import write_wav
+        write_wav(self.audio, 0.2 * np.sin(2 * np.pi * 440 * np.arange(96000) / 48000))
         self.requests = []
         self.responses = []
-        env = patch.dict(os.environ, {
+        # Windows/OpenSSL needs its system directory even with mocked HTTP.
+        runtime = {k: v for k, v in os.environ.items() if k.upper() in {"SYSTEMROOT", "WINDIR"}}
+        env = patch.dict(os.environ, {**runtime,
             "AUDYSSEY_PLANNER_BASE_URL": "http://test.invalid/v1",
             "AUDYSSEY_PLANNER_MODEL": "fake-model",
             "AUDYSSEY_PLANNER_API_KEY": "fake-key",
             "LANGSMITH_TRACING": "false",
+            "AUDYSSEY_VALIDATOR_AUDIO_ONLY": "false",
         }, clear=True)
         env.start()
         self.addCleanup(env.stop)
@@ -105,16 +110,14 @@ class PlannerRealTests(unittest.TestCase):
         self.assertEqual(len(self.requests), 8)
         # A bare empty list is a valid but empty source list, like {"sources": []}.
         self.responses = ['[]']
-        with self.assertRaisesRegex(RuntimeError, "no valid sources"):
-            real.plan(self.video, self.audio, 2, [])
+        self.assertEqual(real.plan(self.video, self.audio, 2, []), [])
         self.assertEqual(len(self.requests), 9)
 
     def test_plan_drops_invalid_items_and_errors_when_none_left(self):
         invalid = [None, 3, {}, self.source(kind="unknown"), self.source(spans="bad"), self.source(spans=[{"start": float("nan"), "end": 1}])]
         self.assertEqual([s.name for s in self.plan([*invalid, self.source()])], ["person"])
-        for sources in [invalid, []]:
-            with self.assertRaisesRegex(RuntimeError, "no valid sources"):
-                self.plan(sources)
+        with self.assertRaisesRegex(RuntimeError, "no valid sources"):
+            self.plan(invalid)
 
     def test_plan_includes_feedback_and_frame_times_in_prompt(self):
         feedback = [PlanIssue(source_name="ghost", kind="missing", message="remove ghost exactly")]
@@ -138,8 +141,8 @@ class PlannerRealTests(unittest.TestCase):
             self.assertEqual(base64.b64decode(url.split(",")[1]), self.image.read_bytes())
         wire = json.dumps(self.requests)
         for data in [self.video.read_bytes(), self.audio.read_bytes()]:
-            self.assertNotIn(data.decode(), wire)
             self.assertNotIn(base64.b64encode(data).decode(), wire)
+        self.assertNotIn(self.video.read_bytes().decode(), wire)
 
     def test_plan_samples_frames_by_fps_up_to_cap(self):
         for env, count in [({"AUDYSSEY_PLANNER_FPS": "3"}, 6), ({"AUDYSSEY_PLANNER_FPS": "3", "AUDYSSEY_PLANNER_MAX_FRAMES": "4"}, 4),
@@ -272,43 +275,44 @@ class PlannerRealTests(unittest.TestCase):
         return SourcePlan(**self.source(visual_hint=hint, **updates))
 
     def test_validate_checks_each_source_in_its_spans(self):
+        from audyssey.tools.planning import planning_scope
+
         plans = [
-            self.visible(spans=[{"start": 0.5, "end": 1.0}, {"start": 1.5, "end": 2.0}]),
-            self.visible(name="dog", description="a dog barking"),
+            self.visible(kind="sfx", spans=[{"start": 0.5, "end": 1.0}, {"start": 1.5, "end": 2.0}]),
+            self.visible(name="dog", kind="sfx", description="a dog barking"),
         ]
-        self.responses = [json.dumps({"present": False, "reason": "no person here"}),
-                          json.dumps({"present": True, "reason": "dog visible"})]
-        issues = real.validate_plan(self.video, self.audio, plans)
+        self.responses = [json.dumps({"status": "unsupported", "evidence": "none", "reason": "no person here"}),
+                          json.dumps({"status": "supported", "evidence": "visual", "reason": "dog visible"})]
+        with planning_scope("generate", False), patch.dict(os.environ, AUDYSSEY_VALIDATOR_CONTEXT_S="0"):
+            issues = real.validate_plan(self.video, self.audio, plans)
         self.assertEqual(issues, [PlanIssue(source_name="person", kind="not_found",
                                             message="person: no person here")])
         first, second = self.requests
         text = "\n".join(p["text"] for p in first["messages"][1]["content"] if p["type"] == "text")
         self.assertIn('"name": "person"', text)
-        self.assertIn("0.5-1, 1.5-2", text)
+        self.assertIn('"target_intervals": [[0.5, 1.0], [1.5, 2.0]]', text)
         self.assertIn("Frame at 0.25 seconds", text)
-        self.assertIn("judge by the sound's producer", first["messages"][0]["content"])
+        self.assertIn("scene-appropriate", first["messages"][0]["content"])
         # One frame per 0.5 s span at 1 fps; no spans means the whole video.
         windows = [(call.args[1], call.args[3], call.args[4]) for call in self.frames.call_args_list]
         self.assertEqual(windows, [(1, 0.5, 1.0), (1, 1.5, 2.0), (2, 0, 2.0)])
-        self.assertIn("0-2", "\n".join(p["text"] for p in second["messages"][1]["content"] if p["type"] == "text"))
+        self.assertIn('"target_intervals": [[0.0, 2.0]]', second["messages"][1]["content"][0]["text"])
 
-    def test_validate_skips_music_and_ambience_without_audio(self):
+    def test_separation_music_and_ambience_also_require_audio(self):
         unseen = [SourcePlan(**self.source(name="wind", kind="ambience")),
                   SourcePlan(**self.source(name="score", kind="music"))]
-        self.assertEqual(real.validate_plan(self.video, self.audio, unseen), [])
+        issues = real.validate_plan(self.video, self.audio, unseen)
+        self.assertEqual([(i.source_name, i.kind) for i in issues],
+                         [("wind", "validation_unavailable"), ("score", "validation_unavailable")])
         self.assertEqual(self.requests, [])
-        # Onscreen-ness comes from kind, not from an optional visual hint.
-        self.responses = [json.dumps({"present": True})]
-        self.assertEqual(real.validate_plan(self.video, self.audio, [SourcePlan(**self.source())]), [])
-        self.assertEqual(len(self.requests), 1)
 
     def test_validate_hears_video_clips_with_audio(self):
         calls = self.clip(windows=True)
         env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true",
-               "AUDYSSEY_VALIDATOR_FPS": "4"}
+               "AUDYSSEY_VALIDATOR_FPS": "4", "AUDYSSEY_VALIDATOR_CONTEXT_S": "0"}
         offscreen = SourcePlan(**self.source(name="wind", kind="ambience",
                                              spans=[{"start": 0, "end": 1}, {"start": 1.5, "end": 2}]))
-        self.responses = [json.dumps({"present": True})]
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio"})]
         with patch.dict(os.environ, env):
             self.assertEqual(real.validate_plan(self.video, self.audio, [offscreen]), [])
         self.assertEqual(calls, [(True, 0, 1), (True, 1.5, 2)])
@@ -317,26 +321,172 @@ class PlannerRealTests(unittest.TestCase):
         self.assertEqual(types, ["text", "text", "video_url", "text", "video_url"])
         self.assertEqual(request["media_io_kwargs"], {"video": {"fps": 4.0, "num_frames": -1}})
         self.assertEqual(request["mm_processor_kwargs"], {"use_audio_in_video": True})
-        self.assertIn("seen or heard", request["messages"][0]["content"])
+        self.assertIn("actually audible", request["messages"][0]["content"])
         self.assertNotIn("cannot hear", request["messages"][0]["content"])
 
     def test_validator_uses_its_own_model(self):
-        env = {"AUDYSSEY_VALIDATOR_MODEL": "validator-model"}
-        self.responses = [json.dumps({"present": True})]
+        env = {"AUDYSSEY_VALIDATOR_MODEL": "validator-model",
+               "AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}
+        self.clip()
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio"})]
         with patch.dict(os.environ, env):
             real.validate_plan(self.video, self.audio, [self.visible()])
             self.plan([self.source()])
         self.assertEqual([r["model"] for r in self.requests], ["validator-model", "fake-model"])
 
-    def test_validate_bad_json_treats_source_as_present(self):
+    def test_validate_bad_json_reports_each_schema_failure(self):
         for bad in ["bad", '{}', '{"present": "maybe"}', '[]']:
             with self.subTest(bad=bad):
                 self.requests.clear()
                 self.responses = [bad, bad]
-                with self.assertLogs(real.__name__, level="WARNING") as logs:
-                    self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+                with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}):
+                    self.clip()
+                    issues = real.validate_plan(self.video, self.audio, [self.visible()])
+                    self.assertEqual(issues[0].kind, "validation_error")
                 self.assertEqual(len(self.requests), 2)
-                self.assertTrue(logs.output)
+
+    def test_empty_plan_is_distinct_from_malformed_sources(self):
+        self.assertEqual(self.plan([]), [])
+        with self.assertRaisesRegex(RuntimeError, "no valid sources"):
+            self.plan([{"kind": "invalid"}])
+
+    def test_planning_purpose_and_audio_availability_reach_english_prompts(self):
+        from audyssey.tools.planning import planning_scope
+
+        calls = self.clip()
+        env = {"AUDYSSEY_PLANNER_INPUT": "video", "AUDYSSEY_PLANNER_VIDEO_AUDIO": "true"}
+        with patch.dict(os.environ, env):
+            for purpose, available in [("separate", True), ("generate", False)]:
+                with planning_scope(purpose, available):
+                    self.plan([self.source()])
+        separate, generate = self.requests
+        self.assertIn("actually audible", separate["messages"][0]["content"])
+        self.assertIn("Do not invent", separate["messages"][0]["content"])
+        self.assertIn('"purpose": "separate"', separate["messages"][1]["content"][0]["text"])
+        self.assertIn("scene-appropriate", generate["messages"][0]["content"])
+        self.assertIn('"audio_available": false', generate["messages"][1]["content"][0]["text"])
+        self.assertNotIn("audio track", generate["messages"][0]["content"])
+        self.assertEqual(calls, [True, False])
+        self.assertNotIn("mm_processor_kwargs", generate)
+        for request in self.requests:
+            self.assertFalse(any("\uac00" <= c <= "\ud7a3" for c in request["messages"][0]["content"]))
+
+    def test_visual_evidence_does_not_approve_separation(self):
+        self.clip()
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}):
+            self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "a dog is visible"})]
+            issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues[0].kind, "validation_uncertain")
+
+    def test_silent_generation_can_be_supported_by_visual_evidence(self):
+        from audyssey.tools.planning import planning_scope
+
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "the ball hits the floor"})]
+        with planning_scope("generate", False):
+            issues = real.validate_plan(self.video, self.audio, [self.visible(kind="sfx")])
+        self.assertEqual(issues, [])
+        self.assertIn("scene-appropriate", self.requests[0]["messages"][0]["content"])
+
+    def test_separation_without_audio_is_unverified_without_model_call(self):
+        issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues[0].kind, "validation_unavailable")
+        self.assertEqual(self.requests, [])
+
+    def test_bad_validator_json_is_not_an_approval(self):
+        self.clip()
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}):
+            self.responses = ["broken", "broken"]
+            issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(len(self.requests), 2)
+        self.assertEqual(issues[0].kind, "validation_error")
+
+    def test_context_clips_are_merged_and_target_times_remain_explicit(self):
+        calls = self.clip(windows=True)
+        plan = self.visible(spans=[{"start": 0.5, "end": 0.6}, {"start": 1.0, "end": 1.1}])
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio", "reason": "speech in both target intervals"})]
+        env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true", "AUDYSSEY_VALIDATOR_CONTEXT_S": "0.5"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [plan]), [])
+        self.assertEqual(calls, [(True, 0.0, 1.6)])
+        text = self.requests[0]["messages"][1]["content"][0]["text"]
+        payload = json.loads(text)
+        self.assertEqual(payload["target_intervals"], [[0.5, 0.6], [1.0, 1.1]])
+        self.assertEqual(payload["context_intervals"], [[0.0, 1.6]])
+        self.assertIn("original_time", self.requests[0]["messages"][0]["content"])
+
+    def test_explicit_uncertainty_remains_an_issue(self):
+        self.clip()
+        self.responses = [json.dumps({"status": "uncertain", "evidence": "audio", "reason": "speech is masked by music"})]
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}):
+            issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues[0].kind, "validation_uncertain")
+
+    def test_out_of_bounds_target_is_rejected_before_model_call(self):
+        plan = self.visible(spans=[{"start": 1.8, "end": 3.0}])
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}):
+            issues = real.validate_plan(self.video, self.audio, [plan])
+        self.assertEqual(issues[0].kind, "span_out_of_range")
+        self.assertEqual(self.requests, [])
+
+    def test_digital_silence_in_target_is_rejected_before_model_call(self):
+        import numpy as np
+        from audyssey.media import write_wav
+
+        audio = np.zeros((96000, 2), dtype=np.float32)
+        audio[60000:70000] = 0.2
+        write_wav(self.audio, audio)
+        plan = self.visible(spans=[{"start": 0.6, "end": 0.8}])
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true"}):
+            issues = real.validate_plan(self.video, self.audio, [plan])
+        self.assertEqual(issues[0].kind, "not_found")
+        self.assertIn("silent", issues[0].message)
+        self.assertEqual(self.requests, [])
+
+    def test_audio_only_validator_sends_pcm_wav_without_video_or_vllm_flags(self):
+        import io
+        import wave
+        import numpy as np
+        from audyssey.media import write_wav
+        tone = 0.2 * np.sin(2 * np.pi * 440 * np.arange(96000) / 48000)
+        write_wav(self.audio, np.column_stack((tone, -tone)))
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio"})]
+        env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true",
+               "AUDYSSEY_VALIDATOR_AUDIO_ONLY": "true", "AUDYSSEY_VALIDATOR_CONTEXT_S": "0"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        request = self.requests[0]
+        parts = request["messages"][1]["content"]
+        self.assertEqual([p["type"] for p in parts], ["text", "text", "input_audio"])
+        payload = parts[-1]["input_audio"]
+        self.assertEqual(payload["format"], "wav")
+        with wave.open(io.BytesIO(base64.b64decode(payload["data"]))) as audio:
+            self.assertEqual((audio.getframerate(), audio.getsampwidth(), audio.getnframes()), (48000, 2, 96000))
+            self.assertEqual(audio.getnchannels(), 2)
+            samples = np.frombuffer(audio.readframes(audio.getnframes()), dtype="<i2").reshape(-1, 2)
+            self.assertGreater(np.max(np.abs(samples)), 0)
+            np.testing.assert_array_equal(samples.sum(axis=1), 0)
+        self.assertNotIn("media_io_kwargs", request)
+        self.assertNotIn("mm_processor_kwargs", request)
+
+    def test_native_gemini_audio_validation_sends_inline_wav_without_upload(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio"})]
+        env = {"AUDYSSEY_VALIDATOR_API": "gemini", "AUDYSSEY_VALIDATOR_INPUT": "video",
+               "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true", "AUDYSSEY_VALIDATOR_AUDIO_ONLY": "true"}
+        with self.gemini(self.respond_gemini), patch.dict(os.environ, env):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        self.assertEqual(self.uploaded, [])
+        parts = self.requests[0]["contents"][0]["parts"]
+        audio = next(p["inlineData"] for p in parts if "inlineData" in p)
+        self.assertEqual(audio.get("mime_type", audio.get("mimeType")), "audio/wav")
+        self.assertTrue(base64.b64decode(audio["data"]).startswith(b"RIFF"))
+
+    def test_unavailable_audio_cannot_support_a_rejection_either(self):
+        from audyssey.tools.planning import planning_scope
+
+        self.responses = [json.dumps({"status": "unsupported", "evidence": "audio", "reason": "no sound"})]
+        with planning_scope("generate", False):
+            issues = real.validate_plan(self.video, self.audio, [self.visible(kind="sfx")])
+        self.assertEqual(issues[0].kind, "validation_uncertain")
 
     def test_planner_traces_exclude_frames_and_preserve_usage(self):
         from langsmith import Client

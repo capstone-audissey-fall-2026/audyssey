@@ -51,7 +51,13 @@ flowchart TB
 | 검사 | 형식 검사 → `validate_plan` → (시각 힌트를 켰을 때) 힌트마다 SAM3 `locate` | `judge`가 분리 트랙을 평가 |
 | 실패하면 | 문제 목록(`PlanIssue`)을 `plan(feedback=…)`에 넘겨 계획 전체를 다시 세움 | `suggestion`이 있으면 그 조건으로, 없으면 `attempt`를 1 올려 그 소스만 다시 분리 |
 | 횟수 한도 | `AUDYSSEY_MAX_PLAN_ROUNDS=2` | `AUDYSSEY_MAX_SEPARATION_RETRIES=2` (최대 3번 시도) |
-| 한도에 닿으면 | 마지막 계획으로 진행하고 경고 표시 | 마지막 트랙을 쓰고 `filter.passed=False` 경고 표시 |
+| 한도에 닿으면 | 검증된 소스만 처리하고, 미검증 소스는 `skipped`와 경고 표시 | 마지막 트랙을 쓰고 `filter.passed=False` 경고 표시 |
+
+플래너와 검수기는 호출별 `planning_scope(purpose, audio_available)`로 분리/생성 목적을 받습니다. 도구 함수 시그니처와 Job JSON은 유지하며, ContextVar를 사용해 동시에 실행되는 작업의 목적이 섞이지 않도록 합니다. 앱과 Studio 모두 같은 그래프에서 이 범위를 설정합니다.
+
+분리 검수는 실제 오디오 근거를 요구합니다. real 검수기에 `video`와 `video_audio=true`를 설정해야 하며, 이미지 입력만으로는 `validation_unavailable`입니다. 생성 검수는 장면 적합성을 확인하고 대사는 거절합니다. 응답은 `status=supported|unsupported|uncertain`, `evidence=audio|visual|audio_visual|none`, `reason`을 사용합니다. 잘못된 JSON은 2회 시도 뒤 `validation_error`로 남고, 검수 API의 전송 오류는 작업 실패로 남습니다. 어느 경우에도 자동 승인하지 않습니다.
+
+검수 대상 앞뒤로 기본 0.5초의 문맥을 추가하고 영상 길이 안으로 제한합니다. 겹치는 문맥 클립은 병합하지만 실제 확인할 구간은 별도로 전달합니다. 프롬프트는 `original_time = clip_start + local_time`을 명시합니다. 세부 정책과 합성 평가 실행법은 [planning.md](planning.md)에 있습니다.
 
 ## 계약, 함수, 명령, API
 

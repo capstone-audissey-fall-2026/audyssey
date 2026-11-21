@@ -31,6 +31,7 @@ from audyssey.media import compute_peaks, extract_audio, is_silent, probe, write
 from audyssey.settings import Settings
 from audyssey.store import JobStore
 from audyssey.tools import Tools, load_tools
+from audyssey.tools.planning import planning_scope
 from audyssey.tools.editing.render import compute_residual, render
 
 
@@ -422,15 +423,16 @@ def build_graph(
                 max_rounds=ctx.settings.max_plan_rounds,
             ),
         )
-        plans, issues = check_plans(
-            ctx.tools.plan(
-                directory / job.video_path,
-                directory / job.audio_path,
+        with planning_scope(job.method or "separate", not job.silent):
+            plans, issues = check_plans(
+                ctx.tools.plan(
+                    directory / job.video_path,
+                    directory / job.audio_path,
+                    job.duration,
+                    state.issues,
+                ),
                 job.duration,
-                state.issues,
-            ),
-            job.duration,
-        )
+            )
         previous = {source.plan.name: source for source in job.sources}
         origin = "generated" if job.silent or job.method == "generate" else "separated"
         sources = []
@@ -477,11 +479,12 @@ def build_graph(
                 max_rounds=ctx.settings.max_plan_rounds,
             ),
         )
-        issues = state.issues or ctx.tools.validate_plan(
-            directory / job.video_path,
-            directory / job.audio_path,
-            [s.plan for s in job.sources],
-        )
+        with planning_scope(job.method or "separate", not job.silent):
+            issues = state.issues or ctx.tools.validate_plan(
+                directory / job.video_path,
+                directory / job.audio_path,
+                [s.plan for s in job.sources],
+            )
         for source in job.sources:
             hint = source.plan.visual_hint
             if hint is None or not ctx.settings.visual_prompt:
@@ -530,6 +533,25 @@ def build_graph(
         ctx = job_context(job)
         # ponytail: sequential per-source loop, fan out with Send when real GPU tools need parallelism
         for source in job.sources:
+            unresolved = [
+                issue
+                for issue in job.plan_issues
+                if issue.source_name is None or issue.source_name == source.plan.name
+            ]
+            if unresolved:
+                source.status, source.track_path, source.filter = "skipped", None, None
+                key = "generate" if source.origin == "generated" else "separate"
+                update_step(
+                    job,
+                    ctx,
+                    StepStatus(
+                        key=f"{key}:{source.id}",
+                        status="warning",
+                        message="Source not validated; skipped: "
+                        + "; ".join(i.message for i in unresolved),
+                    ),
+                )
+                continue
             process_source(job, source, ctx)
         return {"job": job}
 

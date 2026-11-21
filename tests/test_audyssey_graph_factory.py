@@ -93,6 +93,36 @@ class GraphFactoryTests(unittest.TestCase):
         self.assertEqual(result["job"].id, other.id)
         self.assertEqual(result["job"].state, "ready")
 
+    def test_concurrent_jobs_do_not_share_planning_intent(self):
+        from threading import Barrier
+        from audyssey.contracts import SourcePlan
+        from audyssey.tools.planning import current_request
+
+        silent_video = make_video(self.root / "silent.mp4", audio=False)
+        other, _ = self.ctx.store.create("silent.mp4", silent_video.read_bytes())
+        barrier = Barrier(2)
+        observed = {}
+
+        def plan(video, audio, duration, feedback):
+            before = current_request()
+            barrier.wait(timeout=10)
+            observed[video.parent.name] = (before, current_request())
+            return [SourcePlan(name="effect", kind="sfx", description="an effect")]
+
+        self.ctx.tools = replace(self.ctx.tools, plan=plan, validate_plan=lambda *args: [])
+        pipeline = graph.build_graph(self.ctx)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(pipeline.invoke, [
+                {"job_id": self.job.id, "method": "separate"},
+                {"job_id": other.id, "method": "generate"},
+            ]))
+        self.assertTrue(all(r["job"].state == "ready" for r in results))
+        for job_id, purpose, available in [(self.job.id, "separate", True), (other.id, "generate", False)]:
+            before, after = observed[job_id]
+            self.assertEqual((before.purpose, before.audio_available), (purpose, available))
+            self.assertEqual(before, after)
+        self.assertEqual(current_request().purpose, "separate")
+
     def test_preprocess_then_start_reuses_prepared_audio(self):
         pipeline = graph.build_graph(self.ctx)
         prepared = pipeline.invoke({"job_id": self.job.id, "method": None})["job"]

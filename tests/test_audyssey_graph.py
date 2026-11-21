@@ -127,6 +127,47 @@ class GraphTests(unittest.TestCase):
             atol=1e-4,
         )
 
+    def test_unverified_plan_never_reaches_gpu_tools(self):
+        from audyssey.contracts import PlanIssue
+        from unittest.mock import Mock
+
+        self.ctx.settings.max_plan_rounds = 1
+        separate = Mock(side_effect=AssertionError("unverified sources must not run"))
+        self.ctx.tools = replace(
+            self.ctx.tools,
+            validate_plan=lambda video, audio, plans: [
+                PlanIssue(source_name=p.name, kind="validation_error", message="invalid validator output")
+                for p in plans
+            ],
+            separate=separate,
+        )
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(job.state, "ready", job.error)
+        self.assertTrue(all(s.status == "skipped" and s.attempts == 0 for s in job.sources))
+        separate.assert_not_called()
+        self.assertTrue(any(step.status == "warning" and "not validated" in step.message for step in job.steps))
+
+    def test_planner_scope_follows_job_mode_and_restores_after_use(self):
+        from audyssey.tools.planning import current_request
+
+        seen = []
+        original = self.ctx.tools.plan
+        def plan(*args):
+            seen.append(current_request())
+            return original(*args)
+        self.ctx.tools = replace(self.ctx.tools, plan=plan)
+        graph.analyze(self.job, self.ctx, method="generate")
+        self.assertTrue(all(item.purpose == "generate" and item.audio_available for item in seen))
+        self.assertEqual(current_request().purpose, "separate")
+
+    def test_empty_plan_preserves_original_as_residual(self):
+        self.ctx.tools = replace(self.ctx.tools, plan=lambda *args: [], validate_plan=lambda *args: [])
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(job.state, "ready", job.error)
+        self.assertEqual(job.sources, [])
+        graph.handle_command(job, Render(), self.ctx)
+        np.testing.assert_allclose(read_wav(self.directory / job.outputs.mix_wav), read_wav(self.directory / job.audio_path), atol=1e-6)
+
     def test_commands_update_values(self):
         job = graph.analyze(self.job, self.ctx)
         for cmd in [

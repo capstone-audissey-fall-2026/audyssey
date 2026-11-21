@@ -417,6 +417,10 @@ API의 `analyze()`와 Studio는 같은 `build_graph()`로 생성한 그래프를
 | `AUDYSSEY_PLANNER_MAX_FRAMES` | `32` | `frames` 입력에서 한 요청에 보내는 최대 프레임 수 (1~256, 검증기도 같은 값) |
 | `AUDYSSEY_PLANNER_VIDEO_AUDIO` | `false` | `video` 입력에 오디오 트랙 포함 (Gemini, OpenRouter의 Gemini, vLLM Qwen-Omni) |
 | `AUDYSSEY_VALIDATOR_API` / `_BASE_URL` / `_MODEL` / `_API_KEY` / `_INPUT` / `_FPS` / `_VIDEO_AUDIO` | 플래너 값 | 검증기 모델과 입력. 뜻은 같은 이름의 `AUDYSSEY_PLANNER_*`와 같고, 비우면 플래너 값을 씀 |
+| `AUDYSSEY_VALIDATOR_CONTEXT_S` | `0.5` | 검수 대상 앞뒤 문맥 길이(초, 0~5). 영상 경계로 제한하고 겹치는 클립은 병합. 실제 판정 대상 구간은 별도로 전달 |
+| `AUDYSSEY_VALIDATOR_AUDIO_ONLY` | `true` | 분리 검수에서 영상 대신 원본 오디오의 PCM WAV 문맥 구간을 전달. 영상에 의한 소리 추측을 줄임. `false`는 영상+오디오 검수 비교용. 생성 검수는 계속 영상/프레임 사용 |
+
+real 분리 검수는 오디오 근거를 요구합니다. 검수기에 오디오를 지원하는 모델과 `INPUT=video`, `VIDEO_AUDIO=true`를 설정하세요. 이미지 전용 검수는 `validation_unavailable`이며, 재시도 뒤에도 확인되지 않은 소스는 GPU 처리에서 제외합니다. 영상만 보는 기존 vLLM 기본값은 이 검수 조건을 충족하지 못합니다. 생성 모드에서는 장면 적합성을 확인하므로 이미지 검수도 가능합니다. 자세한 정책과 평가 명령은 [planning.md](planning.md)를 참고하세요.
 
 **라우터**
 

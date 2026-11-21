@@ -1,14 +1,16 @@
 """플래닝 담당 모듈의 기본 구현. 성능이 아니라 연결 확인용. 교체 가능."""
 
 import base64
+import io
 import json
-import logging
+import wave
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Literal, TypeVar, cast
 
+import numpy as np
 from google import genai
 from google.genai import errors, types
 from langsmith import trace
@@ -21,6 +23,7 @@ from audyssey import trace as job_trace
 from audyssey.contracts import Model, PlanIssue, SourcePlan, Span, VisualHint
 from audyssey.settings import LLMEndpoint, Settings
 from audyssey.tools.planning import llm
+from audyssey.tools.planning import current_request, prompts
 
 
 class _Sources(Model):
@@ -28,7 +31,8 @@ class _Sources(Model):
 
 
 class _Check(Model):
-    present: bool
+    status: Literal["supported", "unsupported", "uncertain"]
+    evidence: Literal["audio", "visual", "audio_visual", "none"]
     reason: str = ""
 
 
@@ -55,7 +59,7 @@ _RETRY = "Return valid JSON matching the schema."
 _MAX_INLINE_B64 = 19_000_000
 
 # Provider-neutral request media: labels, base64 JPEG frames, base64 mp4 clips.
-_Part = tuple[Literal["text", "image", "video"], str]
+_Part = tuple[Literal["text", "image", "video", "audio"], str]
 _Usage = dict[str, int]
 _Send = Callable[[bool], tuple[str | None, _Usage]]
 
@@ -73,7 +77,11 @@ def _media(
     for i, (start, end) in enumerate(windows):
         if endpoint.input == "video":
             clip = media.planner_clip(
-                video, tmp / f"clip-{i}.mp4", endpoint.video_audio, start, end
+                video,
+                tmp / f"clip-{i}.mp4",
+                endpoint.video_audio and current_request().audio_available,
+                start,
+                end,
             )
             parts += [
                 ("text", f"Video from {start:g} to {end:g} seconds"),
@@ -95,6 +103,28 @@ def _media(
     return parts
 
 
+def _audio_media(
+    samples: np.ndarray, windows: list[tuple[float, float]]
+) -> list[_Part]:
+    """Encode context windows as PCM16 WAV; retain stereo to avoid cancellation."""
+    parts: list[_Part] = []
+    for start, end in windows:
+        data = samples[round(start * 48000) : round(end * 48000)]
+        output = io.BytesIO()
+        with wave.open(output, "wb") as stream:
+            stream.setnchannels(data.shape[1])
+            stream.setsampwidth(2)
+            stream.setframerate(48000)
+            stream.writeframes((np.clip(data, -1, 1) * 32767).astype("<i2").tobytes())
+        parts.extend(
+            [
+                ("text", f"Audio from {start:g} to {end:g} seconds"),
+                ("audio", base64.b64encode(output.getvalue()).decode("ascii")),
+            ]
+        )
+    return parts
+
+
 @contextmanager
 def _chat(
     endpoint: LLMEndpoint, system: str, text: str, parts: list[_Part]
@@ -108,6 +138,13 @@ def _chat(
                 {
                     "type": "image_url",
                     "image_url": {"url": f"data:image/jpeg;base64,{value}"},
+                }
+            )
+        elif kind == "audio":
+            content.append(
+                {
+                    "type": "input_audio",
+                    "input_audio": {"data": value, "format": "wav"},
                 }
             )
         else:
@@ -127,7 +164,7 @@ def _chat(
         # num_frames=-1 lifts vLLM's 32-frame default so fps decides; needs
         # --trust-request-mm-kwargs on the server.
         extra["media_io_kwargs"] = {"video": {"fps": endpoint.fps, "num_frames": -1}}
-        if endpoint.video_audio:
+        if endpoint.video_audio and current_request().audio_available:
             extra["mm_processor_kwargs"] = {"use_audio_in_video": True}
     messages: list[ChatCompletionMessageParam] = [
         {"role": "system", "content": system},
@@ -175,6 +212,12 @@ def _gemini(
                     contents.append(
                         types.Part.from_bytes(
                             data=base64.b64decode(value), mime_type="image/jpeg"
+                        )
+                    )
+                elif kind == "audio":
+                    contents.append(
+                        types.Part.from_bytes(
+                            data=base64.b64decode(value), mime_type="audio/wav"
                         )
                     )
                 else:
@@ -261,9 +304,13 @@ def _request(
                     {
                         "model": endpoint.model,
                         "api": endpoint.api,
-                        "input": endpoint.input,
+                        "input": "audio"
+                        if any(kind == "audio" for kind, _ in parts)
+                        else endpoint.input,
                         "fps": endpoint.fps,
-                        "audio": endpoint.video_audio,
+                        "audio": _hears(endpoint) and current_request().audio_available,
+                        "purpose": current_request().purpose,
+                        "prompt_version": prompts.VERSION,
                         "attempt": attempt + 1,
                         "system": system,
                         "text": text + ("\n" + _RETRY if attempt else ""),
@@ -295,7 +342,8 @@ def _keep_media(record: job_trace.Call, parts: list[_Part]) -> list[dict[str, st
         if kind == "text":
             label = value
             continue
-        name = f"{batch}-{i}.{'jpg' if kind == 'image' else 'mp4'}"
+        suffix = {"image": "jpg", "video": "mp4", "audio": "wav"}[kind]
+        name = f"{batch}-{i}.{suffix}"
         file = record.save(name, base64.b64decode(value))
         kept.append({"kind": kind, "label": label, "file": file})
     return kept
@@ -303,20 +351,6 @@ def _keep_media(record: job_trace.Call, parts: list[_Part]) -> list[dict[str, st
 
 def _hears(endpoint: LLMEndpoint) -> bool:
     return endpoint.input == "video" and endpoint.video_audio
-
-
-def _evidence(endpoint: LLMEndpoint) -> str:
-    if endpoint.input == "frames":
-        return (
-            "Only frames are available, no audio; "
-            "infer likely sources without claiming to hear them. "
-        )
-    if _hears(endpoint):
-        return (
-            "The video includes its audio track; list sounds you hear and "
-            "visible things likely to make sound. "
-        )
-    return "The video is silent; infer likely sources without claiming to hear them. "
 
 
 def _source(item: object, duration: float) -> SourcePlan:
@@ -353,20 +387,26 @@ def plan(
     video: Path, audio: Path, duration: float, feedback: list[PlanIssue]
 ) -> list[SourcePlan]:
     endpoint = Settings().planner_endpoint()
+    request = current_request()
     with TemporaryDirectory() as tmp:
         parts = _media(video, endpoint, [(0.0, duration)], Path(tmp))
     response = _request(
         endpoint,
-        "You are an audio source planner. A source is one sound-producing entity. "
-        "Do not split the same entity; use multiple spans for repeated sounds. "
-        "Kinds: dialogue, sfx, music, ambience. "
-        + _evidence(endpoint)
-        + "Spans and hint times are seconds; boxes are [x0,y0,x1,y1] normalized "
-        "to 0..1. Offscreen sources have visual_hint=null. Return JSON with a "
-        "sources list. Each source follows this schema: "
-        + json.dumps(SourcePlan.model_json_schema()),
+        prompts.planner_prompt(
+            request.purpose,
+            request.audio_available and _hears(endpoint),
+            json.dumps(SourcePlan.model_json_schema()),
+        ),
         f"Video duration: {duration:g} seconds. Feedback: "
-        + json.dumps([issue.model_dump() for issue in feedback]),
+        + json.dumps([issue.model_dump() for issue in feedback])
+        + "\nRequest context: "
+        + json.dumps(
+            {
+                "purpose": request.purpose,
+                "audio_available": request.audio_available,
+                "audio_in_request": request.audio_available and _hears(endpoint),
+            }
+        ),
         parts,
         _Sources,
     )
@@ -376,67 +416,136 @@ def plan(
             sources.append(_source(item, duration))
         except ValueError:
             continue
-    if not sources:
+    if response.sources and not sources:
         raise RuntimeError("planner returned no valid sources")
     return sources
 
 
+def validation_windows(
+    source: SourcePlan, duration: float, padding: float
+) -> list[tuple[float, float]]:
+    """Bound context to the video and avoid sending overlapping clips twice."""
+    targets = [(s.start, s.end) for s in source.spans] or [(0.0, duration)]
+    merged: list[tuple[float, float]] = []
+    for start, end in sorted(targets):
+        start, end = max(0.0, start - padding), min(duration, end + padding)
+        if start >= end:
+            continue
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+        else:
+            merged.append((start, end))
+    return merged
+
+
 def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[PlanIssue]:
-    """Ask the validator model, per source, whether it appears in its own spans."""
-    endpoint = Settings().validator_endpoint()
-    hears = _hears(endpoint)
-    if hears:
-        sense = "Decide whether the source is seen or heard there. "
-    else:
-        # The model cannot hear: judge by whether the named producer is shown.
-        # "Plausibly audible" alone accepted absent producers (a dog) in tests.
-        sense = (
-            "You cannot hear audio, so judge by the sound's producer. First name "
-            "what is visible in the clips. Answer true only if the specific "
-            "producer named in the source (the same kind of person, creature or "
-            "object, or the action causing it) is visible; a sound with no visual "
-            "trace, like a grunt or a voice, is true if that producer is shown. "
-            "Answer false if the producer is a different or absent thing, e.g. a "
-            "dog when only humans or monsters are shown. Put what you saw in the "
-            "reason. "
-        )
-    shown = "video clips" if endpoint.input == "video" else "video frames"
-    system = (
-        f"You verify one planned sound source against {shown} from its time "
-        "ranges. "
-        + sense
-        + 'Return JSON {"present": true or false, "reason": "one short sentence"}.'
-    )
+    """Validate purpose-specific evidence; errors and uncertainty never approve."""
+    if not plans:
+        return []
+    settings = Settings()
+    endpoint = settings.validator_endpoint()
+    request = current_request()
+    hears = request.audio_available and _hears(endpoint)
+    system = prompts.validator_prompt(request.purpose, hears)
     duration, _ = media.probe(video)
+    samples = media.read_wav(audio) if request.purpose == "separate" and hears else None
     issues = []
     for source in plans:
-        if not hears and source.kind in ("music", "ambience"):
-            # Usually nothing visible makes these; without audio there is no evidence.
+        if request.purpose == "separate" and not hears:
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind="validation_unavailable",
+                    message=f"{source.name}: separation requires audio-enabled video validation",
+                )
+            )
             continue
-        windows = [(s.start, s.end) for s in source.spans] or [(0.0, duration)]
-        with TemporaryDirectory() as tmp:
-            parts = _media(video, endpoint, windows, Path(tmp))
-        text = (
-            "Source: "
-            + json.dumps(source.model_dump(include={"name", "kind", "description"}))
-            + ". Time ranges in seconds: "
-            + ", ".join(f"{start:g}-{end:g}" for start, end in windows)
+        if request.purpose == "generate" and source.kind == "dialogue":
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind="unsupported_source",
+                    message=f"{source.name}: dialogue is not generated",
+                )
+            )
+            continue
+        windows = validation_windows(source, duration, settings.validator_context_s)
+        if not windows or any(
+            s.end > duration or s.start >= duration for s in source.spans
+        ):
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind="span_out_of_range",
+                    message=f"{source.name}: no valid validation interval",
+                )
+            )
+            continue
+        if samples is not None:
+            targets = [(s.start, s.end) for s in source.spans] or [(0.0, duration)]
+            if not any(
+                np.max(
+                    np.abs(samples[round(start * 48000) : round(end * 48000)]),
+                    initial=0,
+                )
+                > np.finfo(np.float32).eps
+                for start, end in targets
+            ):
+                issues.append(
+                    PlanIssue(
+                        source_name=source.name,
+                        kind="not_found",
+                        message=f"{source.name}: target intervals are digitally silent",
+                    )
+                )
+                continue
+        if samples is not None and settings.validator_audio_only:
+            parts = _audio_media(samples, windows)
+        else:
+            with TemporaryDirectory() as tmp:
+                parts = _media(video, endpoint, windows, Path(tmp))
+        text = json.dumps(
+            {
+                "source": source.model_dump(include={"name", "kind", "description"}),
+                "purpose": request.purpose,
+                "audio_available": hears,
+                "target_intervals": [(s.start, s.end) for s in source.spans]
+                or [(0.0, duration)],
+                "context_intervals": windows,
+            }
         )
         try:
             check = _request(endpoint, system, text, parts, _Check)
         except _InvalidJSON:
-            logging.getLogger(__name__).warning(
-                "plan validator returned invalid JSON twice for %s; treating as present",
-                source.name,
-            )
-            continue
-        if not check.present:
             issues.append(
                 PlanIssue(
                     source_name=source.name,
-                    kind="not_found",
+                    kind="validation_error",
+                    message=f"{source.name}: validator returned invalid JSON twice; plan is not validated",
+                )
+            )
+            continue
+        kind = None
+        if not hears and check.evidence in {"audio", "audio_visual"}:
+            kind = "validation_uncertain"
+        elif check.status == "unsupported":
+            kind = "not_found"
+        elif (
+            check.status == "uncertain"
+            or check.evidence == "none"
+            or (
+                request.purpose == "separate"
+                and check.evidence not in {"audio", "audio_visual"}
+            )
+        ):
+            kind = "validation_uncertain"
+        if kind:
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind=kind,
                     message=f"{source.name}: "
-                    + (check.reason or "not found in its time ranges"),
+                    + (check.reason or "insufficient evidence in target intervals"),
                 )
             )
     return issues

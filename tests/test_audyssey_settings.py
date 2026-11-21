@@ -127,6 +127,17 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 Settings(planner_max_frames=count)
 
+    def test_validator_context_bounds_and_environment(self):
+        self.assertEqual(Settings().validator_context_s, 0.5)
+        self.assertTrue(Settings().validator_audio_only)
+        with patch.dict(os.environ, AUDYSSEY_VALIDATOR_AUDIO_ONLY="false"):
+            self.assertFalse(Settings().validator_audio_only)
+        with patch.dict(os.environ, AUDYSSEY_VALIDATOR_CONTEXT_S="0.25"):
+            self.assertEqual(Settings().validator_context_s, 0.25)
+        for value in (-0.1, 5.1, float("nan"), float("inf")):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                Settings(validator_context_s=value)
+
     def test_validator_endpoint_falls_back_to_planner(self):
         settings = Settings(planner_base_url="http://planner/v1", planner_model="p",
                             planner_api_key="k", planner_fps=2)
