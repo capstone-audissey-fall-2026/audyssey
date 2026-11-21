@@ -252,6 +252,7 @@ input[type="range"]:disabled { opacity: .4; }
 .menu button[aria-disabled="true"]:focus-visible .mtip, .menu button.tell .mtip { opacity: 1; }
 @media (hover: hover) { .menu button[aria-disabled="true"]:hover .mtip { opacity: 1; } }
 .empty-row { padding: 28px 18px; color: var(--muted); }
+.skip-note { padding: 8px 18px; color: var(--warn); border-left: 3px solid var(--warn); font-size: 13px; }
 .start { display: grid; grid-template-columns: repeat(2, minmax(0, 280px)); justify-content: center; gap: 12px; padding: 28px 18px 18px; }
 .start .cap { grid-column: 1 / -1; text-align: center; margin: 0; min-height: 1.4em; }
 .start-option { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; align-items: center; text-align: start; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); transition-property: scale, border-color; transition-duration: 150ms; transition-timing-function: ease-out; }
@@ -415,6 +416,7 @@ details.sub > summary::-webkit-details-marker { display: none; }
       <div class="nlhint">Enter로 보내기 · Esc로 닫기</div>
     </form>
     <div id="nl-card" role="status"></div>
+    <div id="skip-note" class="skip-note" role="status" hidden></div>
     <div class="grid thead">
       <div>트랙</div>
       <div class="ruler" id="ruler"></div>
@@ -660,8 +662,18 @@ function drawRuler() {
   }), scrub);
 }
 
+function drawSkipNote() {
+  const note = $("skip-note"), issues = (S.job && S.job.plan_issues) || [];
+  const skipped = ((S.job && S.job.sources) || []).filter((x) => x.status === "skipped" && issues.some((i) => i.source_name === x.plan.name));
+  note.hidden = !skipped.length;
+  if (!skipped.length) return;
+  const why = skipped.map((x) => `${x.plan.name} — ${issues.filter((i) => i.source_name === x.plan.name).map((i) => i.message).join("; ")}`);
+  note.textContent = `검수를 통과하지 못해 건너뛴 소스 ${skipped.length}개: ${why.join(", ")}`;
+}
+
 function drawRows() {
   const box = $("rows");
+  drawSkipNote();
   const list = trackList();
   closeMenu();
   if (S.job && !methodOf(S.job) && S.job.state !== "failed") { box.replaceChildren(startPanel()); return; }
