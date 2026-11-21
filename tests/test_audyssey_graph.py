@@ -6,6 +6,7 @@ import numpy as np
 from tests.audyssey_media import make_video
 from audyssey import graph
 from audyssey.contracts import (
+    PlanIssue,
     SourcePlan,
     Source,
     Span,
@@ -167,6 +168,108 @@ class GraphTests(unittest.TestCase):
         self.assertEqual(job.sources, [])
         graph.handle_command(job, Render(), self.ctx)
         np.testing.assert_allclose(read_wav(self.directory / job.outputs.mix_wav), read_wav(self.directory / job.audio_path), atol=1e-6)
+
+    def test_accepted_sources_are_not_revalidated_or_replaced(self):
+        rounds, validated = [], []
+
+        def plan(video, audio, duration, issues):
+            rounds.append(issues)
+            if not issues:
+                return [
+                    SourcePlan(name="door", kind="sfx", description="door"),
+                    SourcePlan(name="dog", kind="sfx", description="dog"),
+                ]
+            return [
+                SourcePlan(name="door", kind="sfx", description="changed door"),
+                SourcePlan(name="dog2", kind="sfx", description="real dog"),
+            ]
+
+        def validate(video, audio, plans):
+            validated.append([p.name for p in plans])
+            if any(p.name == "dog" for p in plans):
+                return [PlanIssue(source_name="dog", kind="not_found", message="dog: silent")]
+            return []
+
+        self.ctx.tools = replace(self.ctx.tools, plan=plan, validate_plan=validate)
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(validated, [["door", "dog"], ["dog2"]])
+        self.assertEqual([s.plan.name for s in job.sources], ["door", "dog2"])
+        self.assertEqual(job.sources[0].plan.description, "door")
+
+    def test_format_issue_does_not_block_validation_of_other_sources(self):
+        self.ctx.settings.max_plan_rounds = 1
+        validated = []
+
+        def validate(video, audio, plans):
+            validated.append([p.name for p in plans])
+            return [PlanIssue(source_name="dog", kind="not_found", message="dog: silent")]
+
+        self.ctx.tools = replace(
+            self.ctx.tools,
+            plan=lambda *a: [
+                SourcePlan(name="blank", kind="sfx", description=" "),
+                SourcePlan(name="dog", kind="sfx", description="dog"),
+            ],
+            validate_plan=validate,
+        )
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(validated, [["dog"]])
+        self.assertTrue(all(s.status == "skipped" for s in job.sources))
+
+    def test_all_pass_in_first_round_needs_no_replan(self):
+        calls = []
+        self.ctx.tools = replace(
+            self.ctx.tools,
+            plan=lambda *a: calls.append(1)
+            or [SourcePlan(name="door", kind="sfx", description="door")],
+            validate_plan=lambda *a: [],
+        )
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(next(s for s in job.steps if s.key == "plan").round, 1)
+
+    def test_hint_not_found_source_is_still_separated_on_last_round(self):
+        from audyssey.contracts import GroundResult, VisualHint
+
+        self.ctx.settings.visual_prompt = True
+        self.ctx.settings.max_plan_rounds = 1
+        hint = VisualHint(time=1, box=(0, 0, 0.5, 1), description="ghost")
+        self.ctx.tools = replace(
+            self.ctx.tools,
+            plan=lambda *a: [
+                SourcePlan(name="a", kind="sfx", description="sound", visual_hint=hint)
+            ],
+            validate_plan=lambda *a: [],
+            locate=lambda *a: GroundResult(found=False),
+        )
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual([i.kind for i in job.plan_issues], ["visual_hint_not_found"])
+        self.assertEqual([s.status for s in job.sources], ["done"])
+
+    def test_not_validated_is_informational(self):
+        calls = []
+        self.ctx.tools = replace(
+            self.ctx.tools,
+            plan=lambda *a: calls.append(1)
+            or [SourcePlan(name="door", kind="sfx", description="door")],
+            validate_plan=lambda *a: [
+                PlanIssue(source_name="door", kind="not_validated", message="door: not validated")
+            ],
+        )
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual([s.status for s in job.sources], ["done"])
+        step = next(s for s in job.steps if s.key == "validate_plan")
+        self.assertEqual(step.status, "done")
+        self.assertIn("not validated", step.message)
+
+    def test_empty_plan_warns(self):
+        self.ctx.tools = replace(
+            self.ctx.tools, plan=lambda *args: [], validate_plan=lambda *args: []
+        )
+        job = graph.analyze(self.job, self.ctx)
+        step = next(s for s in job.steps if s.key == "plan")
+        self.assertEqual((step.status, step.message), ("warning", "No sources proposed"))
 
     def test_commands_update_values(self):
         job = graph.analyze(self.job, self.ctx)

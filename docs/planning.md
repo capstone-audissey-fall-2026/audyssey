@@ -10,13 +10,19 @@ English and versioned in `src/audyssey/tools/planning/prompts.py`.
   `planning_scope`. It uses ContextVar and resets after each tool call. Existing
   tool signatures, SourcePlan and stored Job JSON stay compatible.
 - Separation requires audible evidence. A visible silent object is insufficient;
-  audible offscreen sources remain valid. A real validator needs audio-capable
-  video input. Frames-only input cannot verify audio and returns
-  `validation_unavailable` without an LLM request.
-- By default, `AUDYSSEY_VALIDATOR_AUDIO_ONLY=true` sends PCM16 WAV windows from
-  the original audio for separation, without visual cues. Audio-capable input must
-  still be enabled (`INPUT=video`, `VIDEO_AUDIO=true`). Set the option to `false`
-  to compare video-plus-audio validation. Generation continues using video/frames.
+  audible offscreen sources remain valid.
+- Validation has two modes, chosen by `AUDYSSEY_VALIDATOR_AUDIO`. Unset, audio
+  mode is used only when `INPUT=video` and `VIDEO_AUDIO=true`. `true` sends the
+  WAV even with frames input; `false` forces visual mode.
+- Audio mode sends 16 kHz stereo PCM16 WAV windows from the original audio. If
+  the audio exceeds the inline limit (about 3.5 minutes), that source falls back
+  to visual validation. `AUDYSSEY_VALIDATOR_AUDIO_ONLY=true` (default) omits
+  visual cues; `false` compares video-plus-audio. Generation keeps using
+  video/frames.
+- Visual mode judges separation from frames. Music, ambience and offscreen
+  sources cannot be seen, so they pass as informational `not_validated` issues
+  and do not block or skip the source. `visual_hint_not_found` is likewise
+  informational.
 - Digitally silent target intervals are rejected locally before any model call.
   This only checks numerical silence near float32 precision; it is not VAD or a
   calibrated audibility threshold. Stereo is retained to avoid phase cancellation.
@@ -33,6 +39,9 @@ English and versioned in `src/audyssey/tools/planning/prompts.py`.
 - The existing plan-round limit applies. After the last round, sources with
   unresolved issues are marked `skipped` with a warning and do not invoke GPU
   tools. Valid sources continue. A global issue affects all sources.
+- Replanning is per source: sources that pass validation are accepted and passed
+  to the planner as `accepted_sources`; only failing sources are replanned. The
+  UI lists skipped sources with their reasons above the track table.
 - `ready` means graph processing ended, not that every source was approved.
   Inspect `plan_issues`, source status and step warnings. If every source in a
   separation job is skipped, residual retains the original soundtrack.
@@ -48,8 +57,8 @@ AUDYSSEY_VALIDATOR_CONTEXT_S=0.5
 AUDYSSEY_VALIDATOR_AUDIO_ONLY=true
 ```
 
-The validator model must actually support audio in video. Merely enabling the
-flag on a vision-only model does not add audio capability. Stub behavior remains
+Audio mode needs a validator model that actually accepts audio input. For a
+vision-only model set `AUDYSSEY_VALIDATOR_AUDIO=false`. Stub behavior remains
 deterministic for offline integration tests.
 
 ## Context and timestamps

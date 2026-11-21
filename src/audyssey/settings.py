@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     validator_input: Input | None = None
     validator_fps: float | None = Field(default=None, gt=0, le=30)
     validator_video_audio: bool | None = None
+    # Declares that the validator accepts audio input; unset: the video+audio rule.
+    validator_audio: bool | None = None
     # Extra context around each validation target; overlapping clips are merged.
     validator_context_s: float = Field(default=0.5, ge=0, le=5)
     # Separation validates PCM audio without visual cues; generation still uses video.

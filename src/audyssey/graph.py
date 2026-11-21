@@ -303,6 +303,10 @@ def process_source(job: Job, source: Source, ctx: Context) -> None:
     ctx.store.save(job)
 
 
+INFO_KINDS = {"not_validated"}
+NON_SKIP_KINDS = {"visual_hint_not_found", "not_validated"}
+
+
 class AnalysisInput(BaseModel):
     job_id: str = ""
     job: Job | None = None
@@ -314,6 +318,7 @@ class AnalysisState(BaseModel):
     method: Literal["separate", "generate"] | None = "separate"
     issues: list[PlanIssue] = Field(default_factory=list)
     round: int = 0
+    accepted: list[str] = Field(default_factory=list)
 
 
 def refresh_residual(job: Job, ctx: Context) -> None:
@@ -359,7 +364,13 @@ def build_graph(
         job.state, job.error = "running", None
         if state.method is not None:
             job.method = "generate" if job.silent else state.method
-        return {"job": job, "method": state.method, "issues": [], "round": 0}
+        return {
+            "job": job,
+            "method": state.method,
+            "issues": [],
+            "round": 0,
+            "accepted": [],
+        }
 
     def job_context(job: Job) -> Context:
         directory = context.store.dir(job.id)
@@ -423,43 +434,49 @@ def build_graph(
                 max_rounds=ctx.settings.max_plan_rounds,
             ),
         )
-        with planning_scope(job.method or "separate", not job.silent):
-            plans, issues = check_plans(
-                ctx.tools.plan(
-                    directory / job.video_path,
-                    directory / job.audio_path,
-                    job.duration,
-                    state.issues,
-                ),
+        accepted = [s for s in job.sources if s.plan.name in state.accepted]
+        with planning_scope(
+            job.method or "separate", not job.silent, tuple(s.plan for s in accepted)
+        ):
+            proposed = ctx.tools.plan(
+                directory / job.video_path,
+                directory / job.audio_path,
                 job.duration,
+                [i for i in state.issues if i.kind not in INFO_KINDS],
             )
+        plans, issues = check_plans(
+            [p for p in proposed if p.name not in state.accepted], job.duration
+        )
         previous = {source.plan.name: source for source in job.sources}
         origin = "generated" if job.silent or job.method == "generate" else "separated"
         sources = []
-        for i, plan_item in enumerate(plans, 1):
+        for plan_item in plans:
             source = previous.get(plan_item.name)
             if source is None:
                 source = Source(
-                    id=f"s{i}",
+                    id="",
                     plan=plan_item,
                     origin=origin,
                 )
             else:
-                source.id, source.plan = f"s{i}", plan_item
+                source.plan = plan_item
                 if source.origin != origin:
                     source.origin, source.status = origin, "pending"
                     source.attempts = 0
                     source.track_path, source.filter = None, None
             sources.append(source)
-        job.sources = sources
+        job.sources = accepted + sources
+        for i, source in enumerate(job.sources, 1):
+            source.id = f"s{i}"
         update_step(
             job,
             ctx,
             StepStatus(
                 key="plan",
-                status="done",
+                status="done" if job.sources else "warning",
                 round=round_number,
                 max_rounds=ctx.settings.max_plan_rounds,
+                message="" if job.sources else "No sources proposed",
             ),
         )
         return {"job": job, "issues": issues, "round": round_number}
@@ -479,14 +496,22 @@ def build_graph(
                 max_rounds=ctx.settings.max_plan_rounds,
             ),
         )
-        with planning_scope(job.method or "separate", not job.silent):
-            issues = state.issues or ctx.tools.validate_plan(
-                directory / job.video_path,
-                directory / job.audio_path,
-                [s.plan for s in job.sources],
-            )
-        for source in job.sources:
-            hint = source.plan.visual_hint
+        bad = {i.source_name for i in state.issues}
+        candidates = [
+            s.plan
+            for s in job.sources
+            if s.plan.name not in state.accepted and s.plan.name not in bad
+        ]
+        issues = list(state.issues)
+        if candidates:
+            with planning_scope(job.method or "separate", not job.silent):
+                issues += ctx.tools.validate_plan(
+                    directory / job.video_path,
+                    directory / job.audio_path,
+                    candidates,
+                )
+        for plan_item in candidates:
+            hint = plan_item.visual_hint
             if hint is None or not ctx.settings.visual_prompt:
                 continue
             try:
@@ -497,24 +522,29 @@ def build_graph(
             if not found:
                 issues.append(
                     PlanIssue(
-                        source_name=source.plan.name,
+                        source_name=plan_item.name,
                         kind="visual_hint_not_found",
                         message=message,
                     )
                 )
         job.plan_issues = issues
+        blocking = {i.source_name for i in issues if i.kind not in INFO_KINDS}
+        warn = any(i.kind not in INFO_KINDS for i in issues)
+        accepted = state.accepted + [
+            p.name for p in candidates if p.name not in blocking
+        ]
         update_step(
             job,
             ctx,
             StepStatus(
                 key=active_key,
-                status="warning" if issues else "done",
+                status="warning" if warn else "done",
                 round=state.round,
                 max_rounds=ctx.settings.max_plan_rounds,
                 message="; ".join(i.message for i in issues),
             ),
         )
-        if issues and state.round >= ctx.settings.max_plan_rounds:
+        if warn and state.round >= ctx.settings.max_plan_rounds:
             update_step(
                 job,
                 ctx,
@@ -526,7 +556,7 @@ def build_graph(
                     message="; ".join(i.message for i in issues),
                 ),
             )
-        return {"job": job, "issues": issues}
+        return {"job": job, "issues": issues, "accepted": accepted}
 
     def separate(state: AnalysisState) -> dict:
         job = state.job
@@ -536,7 +566,8 @@ def build_graph(
             unresolved = [
                 issue
                 for issue in job.plan_issues
-                if issue.source_name is None or issue.source_name == source.plan.name
+                if issue.kind not in NON_SKIP_KINDS
+                and (issue.source_name is None or issue.source_name == source.plan.name)
             ]
             if unresolved:
                 source.status, source.track_path, source.filter = "skipped", None, None
@@ -612,7 +643,8 @@ def build_graph(
         "validate",
         lambda state: (
             "plan"
-            if state.issues and state.round < context.settings.max_plan_rounds
+            if any(i.kind not in INFO_KINDS for i in state.issues)
+            and state.round < context.settings.max_plan_rounds
             else "separate"
         ),
         ["plan", "separate"],

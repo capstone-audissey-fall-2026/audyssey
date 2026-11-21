@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from typing import Literal, TypeVar, cast
 
 import numpy as np
+from scipy.signal import resample_poly
 from google import genai
 from google.genai import errors, types
 from langsmith import trace
@@ -109,12 +110,14 @@ def _audio_media(
     """Encode context windows as PCM16 WAV; retain stereo to avoid cancellation."""
     parts: list[_Part] = []
     for start, end in windows:
-        data = samples[round(start * 48000) : round(end * 48000)]
+        data = resample_poly(
+            samples[round(start * 48000) : round(end * 48000)], 1, 3, axis=0
+        )
         output = io.BytesIO()
         with wave.open(output, "wb") as stream:
             stream.setnchannels(data.shape[1])
             stream.setsampwidth(2)
-            stream.setframerate(48000)
+            stream.setframerate(16000)
             stream.writeframes((np.clip(data, -1, 1) * 32767).astype("<i2").tobytes())
         parts.extend(
             [
@@ -405,6 +408,10 @@ def plan(
                 "purpose": request.purpose,
                 "audio_available": request.audio_available,
                 "audio_in_request": request.audio_available and _hears(endpoint),
+                "accepted_sources": [
+                    p.model_dump(include={"name", "kind", "description", "spans"})
+                    for p in request.accepted
+                ],
             }
         ),
         parts,
@@ -445,13 +452,37 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
     settings = Settings()
     endpoint = settings.validator_endpoint()
     request = current_request()
-    hears = request.audio_available and _hears(endpoint)
-    system = prompts.validator_prompt(request.purpose, hears)
+    audio_capable = (
+        settings.validator_audio
+        if settings.validator_audio is not None
+        else _hears(endpoint)
+    )
+    hears = request.audio_available and audio_capable
+    # Visual mode: the validator judges separation from what it sees alone.
+    visual_mode = (
+        request.purpose == "separate" and request.audio_available and not hears
+    )
+    visual = endpoint.model_copy(update={"video_audio": False})
     duration, _ = media.probe(video)
     samples = media.read_wav(audio) if request.purpose == "separate" and hears else None
     issues = []
+
+    def not_validated(source: SourcePlan) -> bool:
+        if source.kind in {"music", "ambience"} or source.visual_hint is None:
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind="not_validated",
+                    message=f"{source.name}: not validated (no visual evidence possible)",
+                )
+            )
+            return True
+        return False
+
     for source in plans:
-        if request.purpose == "separate" and not hears:
+        source_visual = visual_mode
+        source_hears = hears
+        if request.purpose == "separate" and not request.audio_available:
             issues.append(
                 PlanIssue(
                     source_name=source.name,
@@ -459,6 +490,8 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
                     message=f"{source.name}: separation requires audio-enabled video validation",
                 )
             )
+            continue
+        if source_visual and not_validated(source):
             continue
         if request.purpose == "generate" and source.kind == "dialogue":
             issues.append(
@@ -499,23 +532,34 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
                     )
                 )
                 continue
-        if samples is not None and settings.validator_audio_only:
+        parts = None
+        if samples is not None and (
+            settings.validator_audio_only or not _hears(endpoint)
+        ):
             parts = _audio_media(samples, windows)
-        else:
+            # ponytail: oversize audio (~3.5 min at 16 kHz stereo) falls back to visual validation; split windows if long sources matter.
+            if sum(len(v) for k, v in parts if k == "audio") > _MAX_INLINE_B64:
+                parts = None
+                source_hears, source_visual = False, True
+                if not_validated(source):
+                    continue
+        target = endpoint if source_hears else visual
+        if parts is None:
             with TemporaryDirectory() as tmp:
-                parts = _media(video, endpoint, windows, Path(tmp))
+                parts = _media(video, target, windows, Path(tmp))
+        system = prompts.validator_prompt(request.purpose, source_hears)
         text = json.dumps(
             {
                 "source": source.model_dump(include={"name", "kind", "description"}),
                 "purpose": request.purpose,
-                "audio_available": hears,
+                "audio_available": source_hears,
                 "target_intervals": [(s.start, s.end) for s in source.spans]
                 or [(0.0, duration)],
                 "context_intervals": windows,
             }
         )
         try:
-            check = _request(endpoint, system, text, parts, _Check)
+            check = _request(target, system, text, parts, _Check)
         except _InvalidJSON:
             issues.append(
                 PlanIssue(
@@ -526,7 +570,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
             )
             continue
         kind = None
-        if not hears and check.evidence in {"audio", "audio_visual"}:
+        if not source_hears and check.evidence in {"audio", "audio_visual"}:
             kind = "validation_uncertain"
         elif check.status == "unsupported":
             kind = "not_found"
@@ -535,6 +579,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
             or check.evidence == "none"
             or (
                 request.purpose == "separate"
+                and not source_visual
                 and check.evidence not in {"audio", "audio_visual"}
             )
         ):

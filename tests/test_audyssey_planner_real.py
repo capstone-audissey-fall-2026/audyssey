@@ -74,6 +74,17 @@ class PlannerRealTests(unittest.TestCase):
         self.responses.append(json.dumps({"sources": sources}))
         return real.plan(self.video, self.audio, 2, feedback or [])
 
+    def test_planner_sees_accepted_sources_and_instruction(self):
+        from audyssey.tools.planning import planning_scope
+        accepted = (SourcePlan(**self.source(name="door", kind="sfx", description="a door slams")),)
+        with planning_scope("separate", True, accepted):
+            self.plan([self.source()])
+        request = self.requests[0]
+        context = request["messages"][1]["content"][0]["text"]
+        self.assertIn('"accepted_sources": [{"name": "door"', context)
+        self.assertIn("accepted_sources", request["messages"][0]["content"])
+        self.assertIn("do not return them again", request["messages"][0]["content"].lower())
+
     def test_plan_accepts_bare_source_list(self):
         # Gemini sometimes returns the list without the {"sources": ...} wrapper.
         self.responses.append(json.dumps([self.source()]))
@@ -298,12 +309,12 @@ class PlannerRealTests(unittest.TestCase):
         self.assertEqual(windows, [(1, 0.5, 1.0), (1, 1.5, 2.0), (2, 0, 2.0)])
         self.assertIn('"target_intervals": [[0.0, 2.0]]', second["messages"][1]["content"][0]["text"])
 
-    def test_separation_music_and_ambience_also_require_audio(self):
+    def test_separation_music_and_ambience_pass_without_audio(self):
         unseen = [SourcePlan(**self.source(name="wind", kind="ambience")),
                   SourcePlan(**self.source(name="score", kind="music"))]
         issues = real.validate_plan(self.video, self.audio, unseen)
         self.assertEqual([(i.source_name, i.kind) for i in issues],
-                         [("wind", "validation_unavailable"), ("score", "validation_unavailable")])
+                         [("wind", "not_validated"), ("score", "not_validated")])
         self.assertEqual(self.requests, [])
 
     def test_validate_hears_video_clips_with_audio(self):
@@ -387,10 +398,83 @@ class PlannerRealTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertIn("scene-appropriate", self.requests[0]["messages"][0]["content"])
 
-    def test_separation_without_audio_is_unverified_without_model_call(self):
+    def test_separation_visual_mode_validates_visible_producer(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "a person talks on screen"})]
         issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues, [])
+        system = self.requests[0]["messages"][0]["content"]
+        self.assertIn("producer", system)
+        self.assertIn("cannot hear", system)
+
+    def test_separation_visual_mode_passes_music_ambience_and_offscreen_without_call(self):
+        plans = [SourcePlan(**self.source(name="wind", kind="ambience")),
+                 SourcePlan(**self.source(name="score", kind="music")),
+                 SourcePlan(**self.source(name="narrator"))]  # no visual_hint: offscreen
+        issues = real.validate_plan(self.video, self.audio, plans)
+        self.assertEqual([(i.source_name, i.kind) for i in issues],
+                         [("wind", "not_validated"), ("score", "not_validated"), ("narrator", "not_validated")])
+        self.assertEqual(self.requests, [])
+
+    def test_oversize_audio_falls_back_to_visual_validation(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "person visible"})]
+        env = {"AUDYSSEY_VALIDATOR_AUDIO": "true", "AUDYSSEY_VALIDATOR_CONTEXT_S": "0"}
+        with patch.dict(os.environ, env), patch.object(real, "_MAX_INLINE_B64", 10):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        types = [p["type"] for p in self.requests[0]["messages"][1]["content"]]
+        self.assertNotIn("input_audio", types)
+        self.assertIn("cannot hear", self.requests[0]["messages"][0]["content"])
+        text = next(p["text"] for p in self.requests[0]["messages"][1]["content"] if p["type"] == "text")
+        self.assertFalse(json.loads(text)["audio_available"])
+
+    def test_oversize_audio_music_is_not_validated_without_call(self):
+        env = {"AUDYSSEY_VALIDATOR_AUDIO": "true"}
+        with patch.dict(os.environ, env), patch.object(real, "_MAX_INLINE_B64", 10):
+            issues = real.validate_plan(self.video, self.audio, [SourcePlan(**self.source(name="score", kind="music"))])
+        self.assertEqual([(i.source_name, i.kind) for i in issues], [("score", "not_validated")])
+        self.assertEqual(self.requests, [])
+
+    def test_separation_without_soundtrack_is_unavailable(self):
+        from audyssey.tools.planning import planning_scope
+
+        with planning_scope("separate", False):
+            issues = real.validate_plan(self.video, self.audio, [self.visible()])
         self.assertEqual(issues[0].kind, "validation_unavailable")
         self.assertEqual(self.requests, [])
+
+    def test_validator_audio_false_strips_audio_from_clips(self):
+        calls = self.clip()
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "person visible"})]
+        env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true",
+               "AUDYSSEY_VALIDATOR_AUDIO": "false"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        self.assertEqual(calls, [False])
+        self.assertNotIn("mm_processor_kwargs", self.requests[0])
+
+    def test_generate_with_deaf_validator_strips_audio_from_clips(self):
+        from audyssey.tools.planning import planning_scope
+
+        calls = self.clip()
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "ball visible"})]
+        env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true",
+               "AUDYSSEY_VALIDATOR_AUDIO": "false"}
+        with patch.dict(os.environ, env), planning_scope("generate", True):
+            real.validate_plan(self.video, self.audio, [self.visible(kind="sfx")])
+        self.assertEqual(calls, [False])
+        self.assertNotIn("mm_processor_kwargs", self.requests[0])
+
+    def test_visual_mode_separation_audio_evidence_is_uncertain(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio", "reason": "heard it"})]
+        issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues[0].kind, "validation_uncertain")
+
+    def test_validator_audio_true_sends_wav_even_with_frames_input(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio", "reason": "speech heard"})]
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_AUDIO": "true"}):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        types = [p["type"] for p in self.requests[0]["messages"][1]["content"]]
+        self.assertIn("input_audio", types)
+        self.assertNotIn("image_url", types)
 
     def test_bad_validator_json_is_not_an_approval(self):
         self.clip()
@@ -460,7 +544,7 @@ class PlannerRealTests(unittest.TestCase):
         payload = parts[-1]["input_audio"]
         self.assertEqual(payload["format"], "wav")
         with wave.open(io.BytesIO(base64.b64decode(payload["data"]))) as audio:
-            self.assertEqual((audio.getframerate(), audio.getsampwidth(), audio.getnframes()), (48000, 2, 96000))
+            self.assertEqual((audio.getframerate(), audio.getsampwidth(), audio.getnframes()), (16000, 2, 32000))
             self.assertEqual(audio.getnchannels(), 2)
             samples = np.frombuffer(audio.readframes(audio.getnframes()), dtype="<i2").reshape(-1, 2)
             self.assertGreater(np.max(np.abs(samples)), 0)
@@ -478,7 +562,7 @@ class PlannerRealTests(unittest.TestCase):
         parts = self.requests[0]["contents"][0]["parts"]
         audio = next(p["inlineData"] for p in parts if "inlineData" in p)
         self.assertEqual(audio.get("mime_type", audio.get("mimeType")), "audio/wav")
-        self.assertTrue(base64.b64decode(audio["data"]).startswith(b"RIFF"))
+        self.assertTrue(base64.urlsafe_b64decode(audio["data"] + "==").startswith(b"RIFF"))
 
     def test_unavailable_audio_cannot_support_a_rejection_either(self):
         from audyssey.tools.planning import planning_scope
