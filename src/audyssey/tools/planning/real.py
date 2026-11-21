@@ -11,6 +11,7 @@ from tempfile import TemporaryDirectory
 from typing import Literal, TypeVar, cast
 
 import numpy as np
+from scipy.signal import resample_poly
 from google import genai
 from google.genai import errors, types
 from langsmith import trace
@@ -109,12 +110,14 @@ def _audio_media(
     """Encode context windows as PCM16 WAV; retain stereo to avoid cancellation."""
     parts: list[_Part] = []
     for start, end in windows:
-        data = samples[round(start * 48000) : round(end * 48000)]
+        data = resample_poly(
+            samples[round(start * 48000) : round(end * 48000)], 1, 3, axis=0
+        )
         output = io.BytesIO()
         with wave.open(output, "wb") as stream:
             stream.setnchannels(data.shape[1])
             stream.setsampwidth(2)
-            stream.setframerate(48000)
+            stream.setframerate(16000)
             stream.writeframes((np.clip(data, -1, 1) * 32767).astype("<i2").tobytes())
         parts.extend(
             [
@@ -456,11 +459,25 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
         request.purpose == "separate" and request.audio_available and not hears
     )
     visual = endpoint.model_copy(update={"video_audio": False})
-    system = prompts.validator_prompt(request.purpose, hears)
     duration, _ = media.probe(video)
     samples = media.read_wav(audio) if request.purpose == "separate" and hears else None
     issues = []
+
+    def not_validated(source: SourcePlan) -> bool:
+        if source.kind in {"music", "ambience"} or source.visual_hint is None:
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind="not_validated",
+                    message=f"{source.name}: not validated (no visual evidence possible)",
+                )
+            )
+            return True
+        return False
+
     for source in plans:
+        source_visual = visual_mode
+        source_hears = hears
         if request.purpose == "separate" and not request.audio_available:
             issues.append(
                 PlanIssue(
@@ -470,16 +487,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
                 )
             )
             continue
-        if visual_mode and (
-            source.kind in {"music", "ambience"} or source.visual_hint is None
-        ):
-            issues.append(
-                PlanIssue(
-                    source_name=source.name,
-                    kind="not_validated",
-                    message=f"{source.name}: not validated (no visual evidence possible)",
-                )
-            )
+        if source_visual and not_validated(source):
             continue
         if request.purpose == "generate" and source.kind == "dialogue":
             issues.append(
@@ -520,19 +528,27 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
                     )
                 )
                 continue
-        target = visual if visual_mode else endpoint
+        parts = None
         if samples is not None and (
             settings.validator_audio_only or not _hears(endpoint)
         ):
             parts = _audio_media(samples, windows)
-        else:
+            # ponytail: oversize audio (~3.5 min at 16 kHz stereo) falls back to visual validation; split windows if long sources matter.
+            if sum(len(v) for k, v in parts if k == "audio") > _MAX_INLINE_B64:
+                parts = None
+                source_hears, source_visual = False, True
+                if not_validated(source):
+                    continue
+        target = visual if source_visual else endpoint
+        if parts is None:
             with TemporaryDirectory() as tmp:
                 parts = _media(video, target, windows, Path(tmp))
+        system = prompts.validator_prompt(request.purpose, source_hears)
         text = json.dumps(
             {
                 "source": source.model_dump(include={"name", "kind", "description"}),
                 "purpose": request.purpose,
-                "audio_available": hears,
+                "audio_available": source_hears,
                 "target_intervals": [(s.start, s.end) for s in source.spans]
                 or [(0.0, duration)],
                 "context_intervals": windows,
@@ -550,7 +566,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
             )
             continue
         kind = None
-        if not hears and check.evidence in {"audio", "audio_visual"}:
+        if not source_hears and check.evidence in {"audio", "audio_visual"}:
             kind = "validation_uncertain"
         elif check.status == "unsupported":
             kind = "not_found"
@@ -559,7 +575,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
             or check.evidence == "none"
             or (
                 request.purpose == "separate"
-                and not visual_mode
+                and not source_visual
                 and check.evidence not in {"audio", "audio_visual"}
             )
         ):

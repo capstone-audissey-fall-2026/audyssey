@@ -404,6 +404,22 @@ class PlannerRealTests(unittest.TestCase):
                          [("wind", "not_validated"), ("score", "not_validated"), ("narrator", "not_validated")])
         self.assertEqual(self.requests, [])
 
+    def test_oversize_audio_falls_back_to_visual_validation(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "person visible"})]
+        env = {"AUDYSSEY_VALIDATOR_AUDIO": "true", "AUDYSSEY_VALIDATOR_CONTEXT_S": "0"}
+        with patch.dict(os.environ, env), patch.object(real, "_MAX_INLINE_B64", 10):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        types = [p["type"] for p in self.requests[0]["messages"][1]["content"]]
+        self.assertNotIn("input_audio", types)
+        self.assertIn("cannot hear", self.requests[0]["messages"][0]["content"])
+
+    def test_oversize_audio_music_is_not_validated_without_call(self):
+        env = {"AUDYSSEY_VALIDATOR_AUDIO": "true"}
+        with patch.dict(os.environ, env), patch.object(real, "_MAX_INLINE_B64", 10):
+            issues = real.validate_plan(self.video, self.audio, [SourcePlan(**self.source(name="score", kind="music"))])
+        self.assertEqual([(i.source_name, i.kind) for i in issues], [("score", "not_validated")])
+        self.assertEqual(self.requests, [])
+
     def test_separation_without_soundtrack_is_unavailable(self):
         from audyssey.tools.planning import planning_scope
 
@@ -498,7 +514,7 @@ class PlannerRealTests(unittest.TestCase):
         payload = parts[-1]["input_audio"]
         self.assertEqual(payload["format"], "wav")
         with wave.open(io.BytesIO(base64.b64decode(payload["data"]))) as audio:
-            self.assertEqual((audio.getframerate(), audio.getsampwidth(), audio.getnframes()), (48000, 2, 96000))
+            self.assertEqual((audio.getframerate(), audio.getsampwidth(), audio.getnframes()), (16000, 2, 32000))
             self.assertEqual(audio.getnchannels(), 2)
             samples = np.frombuffer(audio.readframes(audio.getnframes()), dtype="<i2").reshape(-1, 2)
             self.assertGreater(np.max(np.abs(samples)), 0)
@@ -516,7 +532,7 @@ class PlannerRealTests(unittest.TestCase):
         parts = self.requests[0]["contents"][0]["parts"]
         audio = next(p["inlineData"] for p in parts if "inlineData" in p)
         self.assertEqual(audio.get("mime_type", audio.get("mimeType")), "audio/wav")
-        self.assertTrue(base64.b64decode(audio["data"]).startswith(b"RIFF"))
+        self.assertTrue(base64.urlsafe_b64decode(audio["data"] + "==").startswith(b"RIFF"))
 
     def test_unavailable_audio_cannot_support_a_rejection_either(self):
         from audyssey.tools.planning import planning_scope
