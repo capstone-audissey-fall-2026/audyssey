@@ -423,6 +423,8 @@ class PlannerRealTests(unittest.TestCase):
         types = [p["type"] for p in self.requests[0]["messages"][1]["content"]]
         self.assertNotIn("input_audio", types)
         self.assertIn("cannot hear", self.requests[0]["messages"][0]["content"])
+        text = next(p["text"] for p in self.requests[0]["messages"][1]["content"] if p["type"] == "text")
+        self.assertFalse(json.loads(text)["audio_available"])
 
     def test_oversize_audio_music_is_not_validated_without_call(self):
         env = {"AUDYSSEY_VALIDATOR_AUDIO": "true"}
@@ -448,6 +450,23 @@ class PlannerRealTests(unittest.TestCase):
             self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
         self.assertEqual(calls, [False])
         self.assertNotIn("mm_processor_kwargs", self.requests[0])
+
+    def test_generate_with_deaf_validator_strips_audio_from_clips(self):
+        from audyssey.tools.planning import planning_scope
+
+        calls = self.clip()
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "ball visible"})]
+        env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true",
+               "AUDYSSEY_VALIDATOR_AUDIO": "false"}
+        with patch.dict(os.environ, env), planning_scope("generate", True):
+            real.validate_plan(self.video, self.audio, [self.visible(kind="sfx")])
+        self.assertEqual(calls, [False])
+        self.assertNotIn("mm_processor_kwargs", self.requests[0])
+
+    def test_visual_mode_separation_audio_evidence_is_uncertain(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio", "reason": "heard it"})]
+        issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues[0].kind, "validation_uncertain")
 
     def test_validator_audio_true_sends_wav_even_with_frames_input(self):
         self.responses = [json.dumps({"status": "supported", "evidence": "audio", "reason": "speech heard"})]

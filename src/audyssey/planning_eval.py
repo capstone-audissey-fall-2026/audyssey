@@ -204,7 +204,8 @@ def run_eval(
             result = "error"
         elif any(i.kind.startswith("validation_") for i in issues):
             result = "uncertain"
-        elif issues:
+        # not_validated is informational: the pipeline still uses that source.
+        elif any(i.kind != "not_validated" for i in issues):
             result = "reject"
         row = {
             "id": case.id,

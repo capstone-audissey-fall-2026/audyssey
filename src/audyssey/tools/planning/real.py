@@ -543,7 +543,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
                 source_hears, source_visual = False, True
                 if not_validated(source):
                     continue
-        target = visual if source_visual else endpoint
+        target = endpoint if source_hears else visual
         if parts is None:
             with TemporaryDirectory() as tmp:
                 parts = _media(video, target, windows, Path(tmp))

@@ -92,6 +92,24 @@ class PlanningEvalTests(unittest.TestCase):
         with self.assertRaises(FileExistsError):
             run_eval(cases, fixtures, out, validate=validate)
 
+    def test_not_validated_only_result_is_accept_and_not_found_is_reject(self):
+        from audyssey.planning_eval import load_cases, run_eval
+
+        case = load_cases(Path("evals/planning/cases.jsonl"))[0]
+        fixtures = self.root / "fixtures"
+        fixtures.mkdir()
+        (fixtures / case.asset).touch()
+        (fixtures / f"{case.sound}.wav").touch()
+        for kind, expected in (("not_validated", "accept"), ("not_found", "reject")):
+            def validate(video, audio, plans, kind=kind):
+                return [PlanIssue(source_name=plans[0].name, kind=kind, message="x")]
+
+            out = self.root / kind
+            with patch("audyssey.planning_eval.probe", return_value=(3.0, 1)):
+                run_eval([case], fixtures, out, validate=validate)
+            row = json.loads((out / "cases.jsonl").read_text().splitlines()[0])
+            self.assertEqual(row["result"], expected)
+
     def test_cli_requires_explicit_opt_in_before_any_real_model_call(self):
         from audyssey.planning_eval import main
 

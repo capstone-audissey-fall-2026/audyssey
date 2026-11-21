@@ -252,7 +252,7 @@ input[type="range"]:disabled { opacity: .4; }
 .menu button[aria-disabled="true"]:focus-visible .mtip, .menu button.tell .mtip { opacity: 1; }
 @media (hover: hover) { .menu button[aria-disabled="true"]:hover .mtip { opacity: 1; } }
 .empty-row { padding: 28px 18px; color: var(--muted); }
-.skip-note { padding: 8px 18px; color: var(--warn); border-left: 3px solid var(--warn); font-size: 13px; }
+.skip-note { padding: 8px 18px; color: var(--warn); border-left: 3px solid var(--warn); font-size: 13px; overflow-wrap: anywhere; }
 .start { display: grid; grid-template-columns: repeat(2, minmax(0, 280px)); justify-content: center; gap: 12px; padding: 28px 18px 18px; }
 .start .cap { grid-column: 1 / -1; text-align: center; margin: 0; min-height: 1.4em; }
 .start-option { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; align-items: center; text-align: start; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); transition-property: scale, border-color; transition-duration: 150ms; transition-timing-function: ease-out; }
