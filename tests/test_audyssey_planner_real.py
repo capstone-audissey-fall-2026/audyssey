@@ -74,6 +74,17 @@ class PlannerRealTests(unittest.TestCase):
         self.responses.append(json.dumps({"sources": sources}))
         return real.plan(self.video, self.audio, 2, feedback or [])
 
+    def test_planner_sees_accepted_sources_and_instruction(self):
+        from audyssey.tools.planning import planning_scope
+        accepted = (SourcePlan(**self.source(name="door", kind="sfx", description="a door slams")),)
+        with planning_scope("separate", True, accepted):
+            self.plan([self.source()])
+        request = self.requests[0]
+        context = request["messages"][1]["content"][0]["text"]
+        self.assertIn('"accepted_sources": [{"name": "door"', context)
+        self.assertIn("accepted_sources", request["messages"][0]["content"])
+        self.assertIn("do not return them again", request["messages"][0]["content"].lower())
+
     def test_plan_accepts_bare_source_list(self):
         # Gemini sometimes returns the list without the {"sources": ...} wrapper.
         self.responses.append(json.dumps([self.source()]))

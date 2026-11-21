@@ -408,6 +408,10 @@ def plan(
                 "purpose": request.purpose,
                 "audio_available": request.audio_available,
                 "audio_in_request": request.audio_available and _hears(endpoint),
+                "accepted_sources": [
+                    p.model_dump(include={"name", "kind", "description", "spans"})
+                    for p in request.accepted
+                ],
             }
         ),
         parts,

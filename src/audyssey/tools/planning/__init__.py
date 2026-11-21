@@ -6,6 +6,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Literal
 
+from audyssey.contracts import SourcePlan
+
 Purpose = Literal["separate", "generate"]
 
 
@@ -13,6 +15,7 @@ Purpose = Literal["separate", "generate"]
 class PlanningRequest:
     purpose: Purpose = "separate"
     audio_available: bool = True
+    accepted: tuple[SourcePlan, ...] = ()
 
 
 _request: ContextVar[PlanningRequest] = ContextVar(
@@ -25,8 +28,10 @@ def current_request() -> PlanningRequest:
 
 
 @contextmanager
-def planning_scope(purpose: Purpose, audio_available: bool) -> Iterator[None]:
-    token = _request.set(PlanningRequest(purpose, audio_available))
+def planning_scope(
+    purpose: Purpose, audio_available: bool, accepted: tuple[SourcePlan, ...] = ()
+) -> Iterator[None]:
+    token = _request.set(PlanningRequest(purpose, audio_available, accepted))
     try:
         yield
     finally:
