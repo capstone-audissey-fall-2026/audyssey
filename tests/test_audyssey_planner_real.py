@@ -298,12 +298,12 @@ class PlannerRealTests(unittest.TestCase):
         self.assertEqual(windows, [(1, 0.5, 1.0), (1, 1.5, 2.0), (2, 0, 2.0)])
         self.assertIn('"target_intervals": [[0.0, 2.0]]', second["messages"][1]["content"][0]["text"])
 
-    def test_separation_music_and_ambience_also_require_audio(self):
+    def test_separation_music_and_ambience_pass_without_audio(self):
         unseen = [SourcePlan(**self.source(name="wind", kind="ambience")),
                   SourcePlan(**self.source(name="score", kind="music"))]
         issues = real.validate_plan(self.video, self.audio, unseen)
         self.assertEqual([(i.source_name, i.kind) for i in issues],
-                         [("wind", "validation_unavailable"), ("score", "validation_unavailable")])
+                         [("wind", "not_validated"), ("score", "not_validated")])
         self.assertEqual(self.requests, [])
 
     def test_validate_hears_video_clips_with_audio(self):
@@ -387,10 +387,48 @@ class PlannerRealTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertIn("scene-appropriate", self.requests[0]["messages"][0]["content"])
 
-    def test_separation_without_audio_is_unverified_without_model_call(self):
+    def test_separation_visual_mode_validates_visible_producer(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "a person talks on screen"})]
         issues = real.validate_plan(self.video, self.audio, [self.visible()])
+        self.assertEqual(issues, [])
+        system = self.requests[0]["messages"][0]["content"]
+        self.assertIn("producer", system)
+        self.assertIn("cannot hear", system)
+
+    def test_separation_visual_mode_passes_music_ambience_and_offscreen_without_call(self):
+        plans = [SourcePlan(**self.source(name="wind", kind="ambience")),
+                 SourcePlan(**self.source(name="score", kind="music")),
+                 SourcePlan(**self.source(name="narrator"))]  # no visual_hint: offscreen
+        issues = real.validate_plan(self.video, self.audio, plans)
+        self.assertEqual([(i.source_name, i.kind) for i in issues],
+                         [("wind", "not_validated"), ("score", "not_validated"), ("narrator", "not_validated")])
+        self.assertEqual(self.requests, [])
+
+    def test_separation_without_soundtrack_is_unavailable(self):
+        from audyssey.tools.planning import planning_scope
+
+        with planning_scope("separate", False):
+            issues = real.validate_plan(self.video, self.audio, [self.visible()])
         self.assertEqual(issues[0].kind, "validation_unavailable")
         self.assertEqual(self.requests, [])
+
+    def test_validator_audio_false_strips_audio_from_clips(self):
+        calls = self.clip()
+        self.responses = [json.dumps({"status": "supported", "evidence": "visual", "reason": "person visible"})]
+        env = {"AUDYSSEY_VALIDATOR_INPUT": "video", "AUDYSSEY_VALIDATOR_VIDEO_AUDIO": "true",
+               "AUDYSSEY_VALIDATOR_AUDIO": "false"}
+        with patch.dict(os.environ, env):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        self.assertEqual(calls, [False])
+        self.assertNotIn("mm_processor_kwargs", self.requests[0])
+
+    def test_validator_audio_true_sends_wav_even_with_frames_input(self):
+        self.responses = [json.dumps({"status": "supported", "evidence": "audio", "reason": "speech heard"})]
+        with patch.dict(os.environ, {"AUDYSSEY_VALIDATOR_AUDIO": "true"}):
+            self.assertEqual(real.validate_plan(self.video, self.audio, [self.visible()]), [])
+        types = [p["type"] for p in self.requests[0]["messages"][1]["content"]]
+        self.assertIn("input_audio", types)
+        self.assertNotIn("image_url", types)
 
     def test_bad_validator_json_is_not_an_approval(self):
         self.clip()

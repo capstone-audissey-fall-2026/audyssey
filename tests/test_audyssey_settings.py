@@ -130,6 +130,9 @@ class SettingsTests(unittest.TestCase):
     def test_validator_context_bounds_and_environment(self):
         self.assertEqual(Settings().validator_context_s, 0.5)
         self.assertTrue(Settings().validator_audio_only)
+        self.assertIsNone(Settings().validator_audio)
+        with patch.dict(os.environ, AUDYSSEY_VALIDATOR_AUDIO="true"):
+            self.assertIs(Settings().validator_audio, True)
         with patch.dict(os.environ, AUDYSSEY_VALIDATOR_AUDIO_ONLY="false"):
             self.assertFalse(Settings().validator_audio_only)
         with patch.dict(os.environ, AUDYSSEY_VALIDATOR_CONTEXT_S="0.25"):

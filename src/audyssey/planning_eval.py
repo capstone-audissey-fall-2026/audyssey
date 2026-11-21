@@ -172,6 +172,7 @@ def run_eval(
         "validator": _endpoint(settings.validator_endpoint()),
         "validator_context_s": settings.validator_context_s,
         "validator_audio_only": settings.validator_audio_only,
+        "validator_audio": settings.validator_audio,
         "include_planning": include_planning,
         "cases_sha256": hashlib.sha256(
             "\n".join(c.model_dump_json() for c in cases).encode()

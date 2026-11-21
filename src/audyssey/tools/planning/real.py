@@ -445,18 +445,39 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
     settings = Settings()
     endpoint = settings.validator_endpoint()
     request = current_request()
-    hears = request.audio_available and _hears(endpoint)
+    audio_capable = (
+        settings.validator_audio
+        if settings.validator_audio is not None
+        else _hears(endpoint)
+    )
+    hears = request.audio_available and audio_capable
+    # Visual mode: the validator judges separation from what it sees alone.
+    visual_mode = (
+        request.purpose == "separate" and request.audio_available and not hears
+    )
+    visual = endpoint.model_copy(update={"video_audio": False})
     system = prompts.validator_prompt(request.purpose, hears)
     duration, _ = media.probe(video)
     samples = media.read_wav(audio) if request.purpose == "separate" and hears else None
     issues = []
     for source in plans:
-        if request.purpose == "separate" and not hears:
+        if request.purpose == "separate" and not request.audio_available:
             issues.append(
                 PlanIssue(
                     source_name=source.name,
                     kind="validation_unavailable",
                     message=f"{source.name}: separation requires audio-enabled video validation",
+                )
+            )
+            continue
+        if visual_mode and (
+            source.kind in {"music", "ambience"} or source.visual_hint is None
+        ):
+            issues.append(
+                PlanIssue(
+                    source_name=source.name,
+                    kind="not_validated",
+                    message=f"{source.name}: not validated (no visual evidence possible)",
                 )
             )
             continue
@@ -499,11 +520,14 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
                     )
                 )
                 continue
-        if samples is not None and settings.validator_audio_only:
+        target = visual if visual_mode else endpoint
+        if samples is not None and (
+            settings.validator_audio_only or not _hears(endpoint)
+        ):
             parts = _audio_media(samples, windows)
         else:
             with TemporaryDirectory() as tmp:
-                parts = _media(video, endpoint, windows, Path(tmp))
+                parts = _media(video, target, windows, Path(tmp))
         text = json.dumps(
             {
                 "source": source.model_dump(include={"name", "kind", "description"}),
@@ -515,7 +539,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
             }
         )
         try:
-            check = _request(endpoint, system, text, parts, _Check)
+            check = _request(target, system, text, parts, _Check)
         except _InvalidJSON:
             issues.append(
                 PlanIssue(
@@ -535,6 +559,7 @@ def validate_plan(video: Path, audio: Path, plans: list[SourcePlan]) -> list[Pla
             or check.evidence == "none"
             or (
                 request.purpose == "separate"
+                and not visual_mode
                 and check.evidence not in {"audio", "audio_visual"}
             )
         ):
