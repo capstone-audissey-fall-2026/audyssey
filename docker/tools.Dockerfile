@@ -2,7 +2,7 @@
 
 # Ubuntu 24.04 ships ffmpeg 6.1; 22.04 has 4.4, whose concat demuxer lacks the
 # `option` directive SAM3 mask encoding uses.
-FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
+FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04 AS runtime
 COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /usr/local/bin/uv
 # gcc/libc6-dev: triton compiles GPU kernels at runtime (SAM Audio Judge).
 # Ubuntu mirrors sometimes drop connections, and a slow download can outlive the
@@ -48,3 +48,12 @@ RUN useradd --create-home --uid 10001 app
 USER app
 EXPOSE 8700
 CMD ["audyssey", "tool-server", "--tool", "separation", "--tool", "filtering", "--tool", "grounding", "--tool", "generation", "--impl", "real", "--host", "0.0.0.0", "--port", "8700"]
+
+# CI runs this stage (--target smoke) instead of loading the 23 GB image into Docker: the stub
+# tool server starts in the image's venv and enforces its token. No GPU needed.
+FROM runtime AS smoke
+RUN --mount=type=bind,source=docker/tools_smoke.py,target=/tmp/tools_smoke.py \
+    python /tmp/tools_smoke.py
+
+# Keep this stage last: publish builds the last stage, and it must not be smoke.
+FROM runtime
