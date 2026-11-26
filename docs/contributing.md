@@ -87,6 +87,7 @@
 - Dockerfile은 바뀌는 빈도가 낮은 것부터 레이어를 쌓습니다. 의존성(`pyproject.toml`, `uv.lock`, `gpu/`)을 먼저 설치하고, `src/`와 웹 빌드 결과는 마지막에 `COPY --link`로 복사합니다. 그 뒤에는 실행 단계가 없습니다.
 - 그래서 `src/`만 바꾼 `publish-images`는 캐시된 의존성 레이어(tools는 압축 약 7GB)를 내려받지 않고 바뀐 레이어만 올립니다. `web/`만 바꾸면 app 이미지의 Node 단계와 마지막 복사 레이어만 다시 만듭니다.
 - 레지스트리 캐시는 `audyssey-app:buildcache`, `audyssey-tools:buildcache` 태그에 씁니다(실행 가능한 이미지가 아님). 캐시 레이어만 zstd로 압축하고, 배포되는 `latest`와 SHA 이미지는 gzip 레이어입니다.
+- `publish-images`는 한 번에 하나만 실행됩니다. 머지가 연달아 들어오면 다음 실행은 앞 실행이 끝날 때까지 기다리고, 기다리는 실행은 가장 최근 것 하나만 남습니다.
 - `docker-build`는 같은 캐시를 읽기만 합니다. 다만 tools의 `smoke` 단계는 이미지 안에서 실행되므로 의존성 레이어를 매번 내려받습니다. 그래서 PR 검사는 `src/`만 바꿔도 수 분이 걸립니다.
 - 의존성이나 Dockerfile을 바꾼 PR은 push마다 `docker-build`가 전체 빌드(tools 약 10~12분)를 합니다(PR은 캐시를 쓰지 않음). 머지 뒤 `publish-images`의 첫 실행이 캐시를 새로 채웁니다.
 

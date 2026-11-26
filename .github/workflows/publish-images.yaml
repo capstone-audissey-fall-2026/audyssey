@@ -20,6 +20,13 @@ permissions:
   contents: read
   packages: write
 
+# One publish at a time: two runs started by back-to-back merges both missed the cache and
+# raced for `latest`. A new run waits for the current one; GitHub keeps only the newest
+# waiting run, so an in-between merge may get no SHA tag (pin the newest published SHA).
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
