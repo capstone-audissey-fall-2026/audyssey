@@ -11,6 +11,9 @@ export function newTrackSpan(time: number, duration: number): Span {
   return { start, end: Math.min(start + 2, duration) };
 }
 
+// A job started with Generate (or a silent video) opens the form on Generate.
+export const defaultNewTrackMethod = (job: Job): Method => (job.method === "generate" || job.silent ? "generate" : "separate");
+
 // A silent video can only generate; speech is never generated.
 export function newTrackCommand(form: NewTrackForm, spans: Span[], job: Job): Command {
   const method: Method = job.silent ? "generate" : form.method;

@@ -1,5 +1,5 @@
 import { FormEvent, useId, useState } from "react";
-import { METHOD_LABEL, NEW_TRACK_KINDS, newTrackCommand } from "../lib/newTrack";
+import { METHOD_LABEL, NEW_TRACK_KINDS, defaultNewTrackMethod, newTrackCommand } from "../lib/newTrack";
 import { objectColor } from "../lib/selection";
 import { formatSpan } from "../lib/span";
 import type { Command, Job, Method, SourceKind, Span } from "../types";
@@ -19,7 +19,7 @@ export default function NewTrackPanel({ job, spans, disabled, onRemoveSpan, onCa
   const [name, setName] = useState("");
   const [kind, setKind] = useState<SourceKind>("sfx");
   const [description, setDescription] = useState("");
-  const [picked, setPicked] = useState<Method>("separate");
+  const [picked, setPicked] = useState<Method>(defaultNewTrackMethod(job));
   const [error, setError] = useState<string | null>(null);
   // A silent video can only generate; speech can only be separated.
   const method: Method = job.silent ? "generate" : kind === "dialogue" ? "separate" : picked;

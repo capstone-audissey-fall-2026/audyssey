@@ -47,3 +47,11 @@ test("NewTrackPanel lists the spans and explains a silent video", async (context
   const blocked = renderToStaticMarkup(createElement(Panel, { ...props, disabled: "Another change is still running." }));
   assert.match(blocked, /Another change is still running\./);
 });
+
+test("defaultNewTrackMethod follows how the job was started", async (context) => {
+  const { defaultNewTrackMethod } = await (await ssr(context)).ssrLoadModule("/src/lib/newTrack.ts");
+  assert.equal(defaultNewTrackMethod(job({ method: "generate" })), "generate");
+  assert.equal(defaultNewTrackMethod(job({ silent: true })), "generate");
+  assert.equal(defaultNewTrackMethod(job({ method: "separate" })), "separate");
+  assert.equal(defaultNewTrackMethod(job({ method: null, silent: false })), "separate");
+});
