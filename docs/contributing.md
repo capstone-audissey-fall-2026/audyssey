@@ -94,7 +94,7 @@
 
 공용 GPU 서버는 `latest`가 아니라 확인한 커밋의 이미지로 고정합니다. `latest`는 머지할 때마다 바뀌므로, 그대로 받으면 확인하지 않은 이미지가 올라갈 수 있습니다.
 
-1. `.env`의 `AUDYSSEY_IMAGE_TAG`에 머지 커밋의 전체 SHA를 넣습니다. 비우면 `latest`를 씁니다.
+1. `.env`의 `AUDYSSEY_IMAGE_TAG`에 가장 최근에 `publish-images`가 성공한 `main` 커밋의 전체 SHA(GHCR 패키지의 태그에서 확인)를 넣습니다. 비우면 `latest`를 씁니다.
 2. 이미지를 받고 띄웁니다. `compose.tools.yaml`로 도구만 띄웠다면 `-f compose.tools.yaml`을 붙입니다.
    ```bash
    docker compose pull && docker compose up -d
