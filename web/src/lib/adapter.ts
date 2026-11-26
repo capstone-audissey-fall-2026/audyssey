@@ -18,6 +18,8 @@ export interface TrackRow {
   pairOf: string | null;
   filter: FilterResult | null;
   attempts: number;
+  // The failed step's message for a failed source, else null.
+  failure: string | null;
   color: string;
 }
 
@@ -61,6 +63,7 @@ export function jobToView(job: Job): JobView {
       pairOf: pair && shown.some((t) => t.id === pair) ? pair : null,
       filter: s.filter,
       attempts: s.attempts,
+      failure: s.status === "failed" ? (job.steps.find((t) => t.status === "failed" && t.key.endsWith(`:${s.id}`))?.message ?? null) : null,
       color: objectColor(i),
     };
   });

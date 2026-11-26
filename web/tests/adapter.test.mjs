@@ -46,9 +46,12 @@ test("spans are editable only for separated sources of a video with audio", asyn
 
 test("a failed source keeps its row without a track", async (context) => {
   const { jobToView } = await (await ssr(context)).ssrLoadModule("/src/lib/adapter.ts");
-  const [row] = jobToView(job({ sources: [source("s1", { status: "failed", track_path: null, attempts: 2 })] })).rows;
+  const steps = [{ key: "separate:s1", status: "failed", round: 0, max_rounds: 0, message: "Audyssey tools server unreachable" }];
+  const [row] = jobToView(job({ steps, sources: [source("s1", { status: "failed", track_path: null, attempts: 2 })] })).rows;
+  assert.equal(row.failure, "Audyssey tools server unreachable");
   assert.equal(row.status, "failed");
   assert.equal(row.trackPath, null);
   assert.equal(row.attempts, 2);
   assert.equal(row.origin, "separated");
+  assert.equal(jobToView(job({ sources: [source("s1")] })).rows[0].failure, null);
 });

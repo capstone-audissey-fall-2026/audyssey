@@ -23,3 +23,19 @@ export function resizeSpan(s: Span, edge: "start" | "end", delta: number, durati
     ? { start: clamp(s.start + delta, 0, s.end - MIN_SPAN), end: s.end }
     : { start: s.start, end: clamp(s.end + delta, s.start + MIN_SPAN, duration) };
 }
+
+// A drag shorter than MIN_SPAN draws nothing.
+export function drawSpan(spans: Span[], from: number, to: number, duration: number): Span[] {
+  const start = clamp(Math.min(from, to), 0, duration);
+  const end = clamp(Math.max(from, to), 0, duration);
+  return end - start < MIN_SPAN ? spans : [...spans, { start, end }];
+}
+
+// A source keeps at least one span: removing the last one returns the list unchanged.
+export function removeSpan(spans: Span[], index: number): Span[] {
+  return spans.length <= 1 ? spans : spans.filter((_, i) => i !== index);
+}
+
+export function sortSpans(spans: Span[]): Span[] {
+  return [...spans].sort((a, b) => a.start - b.start || a.end - b.end);
+}
