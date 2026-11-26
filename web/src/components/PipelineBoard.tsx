@@ -50,10 +50,10 @@ export default function PipelineBoard({ job, lanes, step: openStep, edge: openEd
           </defs>
           {board.lanes.map((lane) => (
             <g className={`blane${lane.busy ? " busy" : ""}`} key={lane.id}>
-              <rect className="band" height={board.laneH - 4} rx="10" width={board.width} x="0" y={lane.y + 2} />
-              <circle className={`ldot ${lane.up === true ? "ok" : lane.up === false ? "bad" : "unknown"}`} cx="14" cy={lane.y + board.laneH / 2 - 7} r="3.5" />
-              <text className="lname" x="24" y={lane.y + board.laneH / 2 - 3}>{lane.name}</text>
-              <text className={`lmodel${lane.up === false ? " down" : ""}`} x="24" y={lane.y + board.laneH / 2 + 13}>{lane.what}</text>
+              <rect className="band" height={lane.h - 4} rx="10" width={board.width} x="0" y={lane.y + 2} />
+              <circle className={`ldot ${lane.up === true ? "ok" : lane.up === false ? "bad" : "unknown"}`} cx="14" cy={lane.y + lane.h / 2 - 7} r="3.5" />
+              <text className="lname" x="24" y={lane.y + lane.h / 2 - 3}>{lane.name}</text>
+              <text className={`lmodel${lane.up === false ? " down" : ""}`} x="24" y={lane.y + lane.h / 2 + 13}>{lane.what}</text>
               <title>{lane.title}</title>
             </g>
           ))}

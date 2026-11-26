@@ -83,3 +83,25 @@ test("PipelineBoard draws the steps as buttons and opens while the job runs", as
   assert.match(ready, /aria-expanded="false"/);
   assert.doesNotMatch(ready, /<svg/);
 });
+
+test("steps sharing a column on one lane stack on a second row; lanes below shift down", async (context) => {
+  const { boardLayout } = await (await ssr(context)).ssrLoadModule("/src/lib/board.ts");
+  const all = ["preprocess", "plan", "validate_plan", "separate", "generate", "judge", "score", "residual", "render"];
+  const layout = boardLayout([{ id: "all", name: "App server", models: [], steps: all, up: true }], job({ method: null }));
+  const node = (step) => layout.nodes.find((n) => n.step === step);
+  for (const [first, later] of [["separate", "generate"], ["judge", "score"]]) {
+    assert.equal(node(later).x, node(first).x);
+    assert.ok(node(later).y > node(first).y);
+  }
+  assert.equal(new Set(layout.nodes.map((n) => `${n.x},${n.y}`)).size, layout.nodes.length);
+  assert.equal(layout.height, 2 * layout.laneH);
+  assert.equal(layout.lanes[0].h, 2 * layout.laneH);
+  assert.ok(layout.edges.every((e) => !e.d.includes("NaN")));
+  // A lane below the collision shifts down by the extra row.
+  const below = boardLayout(
+    [{ id: "a", name: "A", models: [], steps: all.slice(1), up: true }, { id: "b", name: "B", models: [], steps: ["preprocess"], up: true }],
+    job({ method: null }),
+  );
+  assert.equal(below.lanes[1].y, 2 * below.laneH);
+  assert.equal(below.height, 3 * below.laneH);
+});

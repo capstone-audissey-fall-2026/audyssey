@@ -120,7 +120,7 @@ const serverName = (lane: Lane) => lane.name.replace(/^vLLM \(.+\)$/, "vLLM").re
 export interface BoardNode { step: string; x: number; y: number; status: NodeStatus; sub: string; idle: boolean; label: string; model: string }
 export interface BoardEdge { key: string; from: string; to: string; kind: DataKind; loop: boolean; state: "" | "active" | "done"; d: string }
 export interface BoardLabel { text: string; x: number; y: number; loop: boolean; on: boolean }
-export interface BoardLane { id: string; name: string; what: string; up: boolean | null; busy: boolean; y: number; title: string }
+export interface BoardLane { id: string; name: string; what: string; up: boolean | null; busy: boolean; y: number; h: number; title: string }
 export interface Board { width: number; height: number; nodeW: number; nodeH: number; laneH: number; lanes: BoardLane[]; nodes: BoardNode[]; edges: BoardEdge[]; labels: BoardLabel[] }
 
 export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
@@ -133,7 +133,12 @@ export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
   const lanes = (lanesIn.length ? lanesIn : DEFAULT_LANES).filter((l) => l.steps.some((s) => s in COL));
   const row = (step: string) => Math.max(0, lanes.findIndex((l) => l.steps.includes(step)));
   const labelW = 150, colW = 124, nodeW = 96, nodeH = 46, laneH = 62, left = labelW + 18, gap = 4, r = 8;
-  const pos = (step: string) => ({ x: left + COL[step] * colW, y: row(step) * laneH + (laneH - nodeH) / 2 });
+  // A step that shares its column with an earlier step of the same lane (generate with separate, score with judge) takes a second row.
+  const order = Object.keys(COL);
+  const sub = (step: string) => order.filter((s) => COL[s] === COL[step] && row(s) === row(step) && order.indexOf(s) < order.indexOf(step)).length;
+  const laneRows = lanes.map((_, i) => 1 + Math.max(0, ...order.filter((s) => row(s) === i).map(sub)));
+  const laneTop = laneRows.map((_, i) => laneRows.slice(0, i).reduce((a, b) => a + b, 0) * laneH);
+  const pos = (step: string) => ({ x: left + COL[step] * colW, y: laneTop[row(step)] + sub(step) * laneH + (laneH - nodeH) / 2 });
   const state = Object.fromEntries(Object.keys(COL).map((s) => [s, nodeState(job, s)])) as Record<string, ReturnType<typeof nodeState>>;
   const stepsOf = (step: string) => job?.steps.filter((s) => stepKey(s.key) === step) ?? [];
   // A same-row loop on the bottom lane curves under it; make room for it.
@@ -141,7 +146,7 @@ export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
     ([from, to, , loop]) => loop && row(from) === row(to) && row(to) === lanes.length - 1 && !idle(to) && stepsOf(to).some((s) => (s.round || 1) > 1),
   );
   const width = left + 6 * colW + nodeW + 14;
-  const height = lanes.length * laneH + (lowLoop ? 26 : 0);
+  const height = laneRows.reduce((a, b) => a + b, 0) * laneH + (lowLoop ? 26 : 0);
 
   const nodeModel = (step: string) => {
     const lane = lanes.find((l) => l.steps.includes(step));
@@ -223,7 +228,8 @@ export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
       what: shorten(lane.up === false ? "Not responding" : lane.id === "app" ? "ffmpeg" : (lane.models[0] || "").split("/").pop() ?? "", 22),
       up: lane.up,
       busy: lane.steps.some((s) => state[s]?.status === "running"),
-      y: i * laneH,
+      y: laneTop[i],
+      h: laneRows[i] * laneH,
       title: `${serverName(lane)}: ${lane.models.join(", ") || "ffmpeg"}`,
     })),
     // Idle nodes first: with every step on one server, the live node is drawn over the dimmed one.
