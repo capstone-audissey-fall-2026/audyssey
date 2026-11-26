@@ -74,6 +74,11 @@ export function engineTracks(job: Job, view: JobView, reload = 0): EngineTrack[]
   return tracks;
 }
 
+// While a change runs the engine keeps what it has loaded, because a pitched copy is written only by the render that ends the change.
+export function heldTracks(loaded: EngineTrack[] | null, next: EngineTrack[], busy: string | null): EngineTrack[] {
+  return busy !== null && loaded !== null ? loaded : next;
+}
+
 // Re-separating or regenerating also renders, so the pitched copies and the export match the new audio.
 export function withRender(commands: Command[]): Command[] {
   const heavy = commands.some((c) => c.type === "reseparate" || c.type === "generate");

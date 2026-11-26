@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { fileUrl, getRouter, getSystem, getTrace, sendCommand } from "../api";
 import { jobToView } from "../lib/adapter";
-import { AudioEngine } from "../lib/audioEngine";
+import { AudioEngine, type EngineTrack } from "../lib/audioEngine";
 import { highlightChip, visibleBoxes } from "../lib/highlight";
 import { newTrackSpan } from "../lib/newTrack";
 import { PendingEdits } from "../lib/pendingEdits";
 import { reconcileSelection, transportAction } from "../lib/selection";
 import { removeSpan } from "../lib/span";
-import { engineTracks, keepCommands, regenerateBlockedReason, withRender } from "../lib/trackActions";
+import { engineTracks, heldTracks, keepCommands, regenerateBlockedReason, withRender } from "../lib/trackActions";
 import type { Command, Job, Lane, Span, TraceCall } from "../types";
 import EditBar from "./EditBar";
 import Inspector, { EdgePopover } from "./Inspector";
@@ -90,12 +90,14 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
   }, [engine, job.duration]);
 
   // Load what the tracks play; only a changed url is fetched again.
-  const tracks = engineTracks(job, view, reload);
+  const loaded = useRef<EngineTrack[] | null>(null);
+  const tracks = heldTracks(loaded.current, engineTracks(job, view, reload), busy);
   const tracksKey = JSON.stringify(tracks);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stableTracks = useMemo(() => tracks, [tracksKey]);
   useEffect(() => {
     if (!engine) return;
+    loaded.current = stableTracks;
     void engine.setTracks(stableTracks);
   }, [engine, stableTracks]);
   // Waveforms are drawn from decoded audio, whichever load finishes.

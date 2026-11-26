@@ -91,3 +91,19 @@ test("engineTracks urls change when the reload counter does, even if the file na
   assert.equal(a.length, 3);
   a.forEach((t, i) => assert.notEqual(t.url, b[i].url, t.id));
 });
+
+test("heldTracks keeps the loaded tracks while a change runs, so no pitched copy is requested before its render", async (context) => {
+  const [{ engineTracks, heldTracks }, jobToView] = await load(context);
+  const outputs = { mix_wav: "out/mix.wav", video_mp4: "out/video.mp4", stems: [] };
+  const j = job({ version: 3, outputs, sources: [source("s1")] });
+  const before = engineTracks(j, jobToView(j));
+  assert.match(before[0].url, /files\/tracks\/s1\.wav\?v=/);
+  // After set_pitch, before the render: the job already says +2 and has outputs from the earlier render.
+  const j2 = job({ ...j, version: j.version + 1, sources: [source("s1", { pitch_semitones: 2 })] });
+  const next = engineTracks(j2, jobToView(j2));
+  assert.match(next[0].url, /files\/out\/pitch_s1\.wav\?v=/);
+
+  assert.deepEqual(heldTracks(before, next, "Raise pitch"), before);
+  assert.deepEqual(heldTracks(before, next, null), next);
+  assert.deepEqual(heldTracks(null, next, "Raise pitch"), next);
+});
