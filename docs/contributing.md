@@ -48,7 +48,7 @@
 | 1. 브랜치 | 없음 | 최신 `main`에서 브랜치를 만듦 |
 | 2. 커밋 | 없음 (로컬 훅 없음) | 커밋 전에 [로컬 검사](#로컬-검사)를 통과시킴 |
 | 3. push | 없음. push만으로는 CI가 돌지 않음 | `git push -u origin <브랜치>` (팀원은 write 권한으로 레포에 직접 push) |
-| 4. PR (대상 `main`) | `ci-lint`가 job 3개를 실행하며 모두 필수:<br>- `lint-and-format-check`: ruff lint·format, ty, unittest<br>- `numpy-1x`: Python 3.12 + numpy 1.26 unittest<br>- `docker-build`: app 이미지 빌드(push 안 함). tools 이미지는 `docker/tools.Dockerfile`, `gpu/`, 도구 코드, 의존성이 바뀐 PR에서만 빌드 | 설명에 요약과 확인 방법을 적음. 핵심 파일을 바꿨다면 팀 합의를 받음. 실패하면 고쳐서 다시 push |
+| 4. PR (대상 `main`) | `ci-lint`가 job 3개를 실행하며 모두 필수:<br>- `lint-and-format-check`: ruff lint·format, ty, unittest<br>- `numpy-1x`: Python 3.12 + numpy 1.26 unittest<br>- `docker-build`: 배포될 이미지가 실제로 실행되는지 확인(push와 캐시 쓰기 없음). app 이미지는 컨테이너를 띄워 `GET /`이 빌드된 웹 UI(`/assets` 참조)를, `GET /api/jobs`가 JSON을 돌려주는지 검사. tools 이미지는 `docker/tools.Dockerfile`, `gpu/`, `src/`, 의존성이 바뀐 PR에서만 빌드하며, 빌드 안의 smoke 단계(`docker/tools_smoke.py`)가 `import torch, audyssey`와 stub tool-server(`/health`의 도구 4개, 틀린 토큰은 401)를 검사(GPU 없음) | 설명에 요약과 확인 방법을 적음. 핵심 파일을 바꿨다면 팀 합의를 받음. 실패하면 고쳐서 다시 push |
 | 5. merge | `main` 보호 규칙 적용:<br>- 필수 검사 통과와 최신 `main` 반영 전에는 머지 불가 (관리자 포함)<br>- 승인 1명 필요. 핵심 파일은 @gwpark0741 또는 @Zero-woo 승인 필요 (`.github/`는 @gwpark0741만). 새로 push하면 기존 승인은 다시 받아야 함<br>- 강제 push와 브랜치 삭제 금지 | 리뷰를 받고 머지. 관리자 본인 PR은 승인 없이 머지할 수 있지만 검사는 똑같이 통과해야 함. 머지 커밋 방식을 쓰고, 머지한 브랜치는 직접 지움 |
 | 6. 배포 | `main`에 이미지에 들어가는 파일(`src/`, 의존성, `gpu/`, `docker/`)이 반영되면 `publish-images`가 `audyssey-app`, `audyssey-tools`를 빌드해 GHCR에 `latest`와 커밋 SHA 태그로 올림 (수동 실행 가능, PR에서는 올리지 않음) | 아래 [서버 갱신](#서버-갱신)대로 SHA 태그로 고정해 올림. RunPod은 Pod를 다시 만들 때 SHA 태그를 지정 |
 
@@ -58,6 +58,7 @@
 
 - Dockerfile은 바뀌는 빈도가 낮은 것부터 레이어를 쌓습니다. 의존성(`pyproject.toml`, `uv.lock`, `gpu/`)을 먼저 설치하고 그다음 `src/`, 웹 빌드 결과를 복사하므로, 코드만 바꾸면 의존성 레이어(tools는 torch 포함 약 20GB)를 다시 만들지 않습니다. 웹(`web/`)만 바꾸면 app 이미지의 Node 단계와 마지막 복사 레이어만 다시 만듭니다.
 - `publish-images`는 이미지마다 레지스트리 캐시를 씁니다. 캐시는 `ghcr.io/capstone-audissey-fall-2026/audyssey-app:buildcache`, `audyssey-tools:buildcache` 태그에 저장되고(실행 가능한 이미지가 아님), 바뀐 레이어만 새로 빌드합니다. 캐시 레이어만 zstd로 압축하며(buildx가 읽는 용도), 배포되는 `latest`와 SHA 이미지는 gzip 레이어를 유지합니다. `ci-lint`의 `docker-build`는 같은 캐시를 읽기만 합니다.
+- 의존성이나 Dockerfile을 바꾼 PR은 push마다 `docker-build`가 전체 빌드(tools 약 10~12분)를 합니다(PR은 캐시를 쓰지 않음). 머지 뒤 `publish-images`의 첫 실행이 캐시를 새로 채웁니다.
 - 서버에서 직접 빌드할 때는 `uv` 다운로드 캐시가 BuildKit 캐시 마운트에 남아 재시도와 재빌드가 빨라집니다.
 
 ## 서버 갱신
