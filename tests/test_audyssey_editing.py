@@ -75,6 +75,19 @@ class EditingTests(unittest.TestCase):
         self.assertEqual(len(editing.render(self.job, self.root, False).stems), 1)
         self.assertEqual(len(editing.render(self.job, self.root, True).stems), 2)
 
+    def test_dropped_pitched_source_still_gets_pitched_copy(self):
+        self.residual()
+        self.job.sources[0].keep = False
+        self.job.sources[0].pitch_semitones = 2
+        out = editing.render(self.job, self.root, False)
+        self.assertTrue((self.root / "out/pitch_s1.wav").exists())
+        self.assertNotIn("out/stems/s1.wav", out.stems)
+        np.testing.assert_allclose(
+            read_wav(self.root / out.mix_wav),
+            self.audio - read_wav(self.tracks[0]),
+            atol=1e-4,
+        )
+
     def test_all_dropped_renders_silence(self):
         self.residual()
         for source in self.job.sources:
