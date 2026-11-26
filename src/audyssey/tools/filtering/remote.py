@@ -1,12 +1,11 @@
 from pathlib import Path
 
 from audyssey.contracts import FilterResult, SourcePlan
-from audyssey.settings import Settings
-from audyssey.tools.remote import post
+from audyssey.tools.remote import post, remote_settings
 
 
 def judge(mono: Path, track: Path, plan: SourcePlan) -> FilterResult:
-    settings = Settings()
+    settings = remote_settings()
     response = post(
         settings.filter_url,
         "/judge",

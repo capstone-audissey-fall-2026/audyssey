@@ -6,11 +6,13 @@ from importlib.resources import files
 from tempfile import TemporaryDirectory
 from threading import Lock, Thread
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from fastapi import Body, FastAPI, HTTPException, Request, UploadFile
 import httpx
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from audyssey import trace
 from audyssey.contracts import (
@@ -27,7 +29,14 @@ from audyssey.settings import Settings
 from audyssey.store import JobStore
 from audyssey.uploads import save_upload
 from audyssey.tools import Tools, load_tools
+from audyssey.tools.remote import override, set_override, with_override
 from audyssey.tools.routing import Routed, load_router
+
+
+class GpuTools(BaseModel):
+    tools_url: str
+    # None keeps the current token; "" drops the saved one (the env token applies again).
+    token: str | None = None
 
 
 def create_app(
@@ -39,6 +48,7 @@ def create_app(
     settings = settings or Settings()
     route = router or load_router(settings)
     ctx = Context(tools or load_tools(settings), settings, JobStore(settings.work_dir))
+    base_tools = ctx.tools
     app = FastAPI()
     app.state.ctx = ctx
     webui = webui_dir or Path(str(files("audyssey") / "webui"))
@@ -182,9 +192,52 @@ def create_app(
         """Which router answers /route; the UI turns the NL bar off for stub."""
         return {"router": settings.router}
 
+    def gpu_tools_state() -> dict:
+        # The token is never returned, only whether one is set.
+        current = ctx.settings
+        return {
+            "tools_url": override()[0],
+            "token_set": bool(current.tool_token),
+            "remote": {
+                "separator": current.separator == "remote",
+                "filter": current.filter == "remote",
+                "grounder": current.grounder == "remote",
+                "generator": current.generator == "remote",
+            },
+        }
+
+    @app.get("/api/gpu-tools")
+    def get_gpu_tools() -> dict:
+        return gpu_tools_state()
+
+    @app.post("/api/gpu-tools")
+    def set_gpu_tools(data: GpuTools) -> dict:
+        """Point all four tools at one tools server for this app process.
+
+        A URL switches separator, filter, grounder and generator to remote; an empty URL
+        clears the override and the environment settings apply again.
+        """
+        url = data.tools_url.strip().rstrip("/")
+        if url:
+            parts = urlsplit(url)
+            if parts.scheme not in ("http", "https") or not parts.hostname:
+                raise HTTPException(422, "tools_url must be an http(s) URL")
+            if parts.username or parts.password:
+                raise HTTPException(422, "tools_url must not contain credentials")
+        # Running jobs read the URL on every call, so a change would split them across servers.
+        # ponytail: a job that starts right after this check is not covered.
+        if any(lock.locked() for lock in locks.values()):
+            raise HTTPException(409, "a job is running")
+        token = override()[1] if data.token is None else data.token
+        set_override(url, token if url else "")
+        ctx.settings = with_override(settings)
+        ctx.tools = load_tools(ctx.settings) if url else base_tools
+        return gpu_tools_state()
+
     @app.get("/api/system")
     def system() -> list[dict]:
         """Servers in pipeline order, with what runs on each and whether it is up."""
+        settings = ctx.settings
         urls = {
             "separate": (settings.separator, settings.separator_url),
             "judge": (settings.filter, settings.filter_url),
