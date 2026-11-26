@@ -13,14 +13,14 @@
 ```bash
 uv sync --extra ui
 (cd web && npm ci && npm run build)   # Node 20.19 이상 (22 권장). 건너뛰면 `/`에 이전 단일 파일 화면이 뜹니다
-uv run audyssey serve                 # http://127.0.0.1:8600 에서 samples/sample.mp4 열기
+uv run audyssey serve                 # http://127.0.0.1:8600 에서 samples/sample.mp4를 열고 Separate 누르기
 ```
 
 - 모든 도구가 stub입니다. 결과는 가짜이므로 품질 평가에는 쓰지 않습니다.
 - 8600 포트가 사용 중이면 `--port 8601`처럼 바꿉니다. 끌 때는 Ctrl+C를 누르며, 작업 파일은 `work/jobs`에 남습니다.
 - 화면 경로: `/`는 `web/`의 React 앱(`src/audyssey/webui/`가 있을 때), `/legacy`는 이전 단일 파일 화면, `/dev`는 개발용 화면입니다.
 - 화면 개발: `cd web && npm run dev`(http://localhost:5173)는 `/api`를 `127.0.0.1:8600`으로 프록시하므로 `audyssey serve`를 먼저 띄웁니다. 웹 테스트는 `npm test`입니다.
-- 무음 영상: `ffmpeg -i samples/sample.mp4 -an -c:v copy /tmp/silent.mp4`로 만들어 올리면 대사는 "대사는 생성하지 않음"으로 표시되고 generation만 돕니다.
+- 무음 영상: `ffmpeg -i samples/sample.mp4 -an -c:v copy /tmp/silent.mp4`로 만들어 올리면 대사는 화면의 "Skipped by the plan check"에 소스 이름으로 나열되고 generation만 돕니다.
 - 코드를 고친 뒤에는 [로컬 검사](contributing.md#로컬-검사)를 돌립니다. 단위 테스트도 GPU 없이 돕니다.
 
 | 도구 | stub 동작 |
@@ -93,7 +93,7 @@ docker compose up -d main separation judge grounding generation
 
 **확인**
 - 서버에서 http://localhost:8600, 원격 서버라면 노트북에서 `ssh -L 8600:localhost:8600 <서버>`를 연 뒤 같은 주소로 접속합니다.
-- `samples/sample.mp4`로 separation이 끝나는지 보고, 비대사 소스에서 "생성으로 바꾸기"를 눌러 봅니다. 첫 작업은 모델을 GPU에 올리느라 2~3분 걸립니다.
+- `samples/sample.mp4`를 열고 Separate를 눌러(무음 영상이면 Generate) 끝나는지 봅니다. 업로드만으로는 전처리까지만 돌고 Separate나 Generate를 눌러야 시작합니다. 끝나면 대사가 아닌 트랙에서 "Generate instead"를 눌러 봅니다. 첫 작업은 모델을 GPU에 올리느라 2~3분 걸립니다.
 - 로그: `docker compose logs -f main separation judge generation`
 
 **내리기 (끝나면 꼭)**

@@ -23,7 +23,7 @@ uv sync --extra ui
 uv run audyssey serve
 ```
 
-브라우저에서 http://127.0.0.1:8600 을 열고 `samples/sample.mp4`를 엽니다. 모든 모델 자리에 가짜 구현(stub)이 들어 있어 GPU, API 키, 모델 가중치가 필요 없습니다. Python 3.11 이상, [uv](https://docs.astral.sh/uv/), ffmpeg가 필요합니다.
+브라우저에서 http://127.0.0.1:8600 을 열고 `samples/sample.mp4`를 연 뒤 Separate를 누릅니다(업로드만으로는 전처리까지만 돌며, 무음 영상은 Generate를 누릅니다). 모든 모델 자리에 가짜 구현(stub)이 들어 있어 GPU, API 키, 모델 가중치가 필요 없습니다. Python 3.11 이상, [uv](https://docs.astral.sh/uv/), ffmpeg가 필요합니다.
 
 ## 폴더
 
