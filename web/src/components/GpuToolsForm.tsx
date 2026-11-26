@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useId, useState } from "react";
 import { getGpuTools, saveGpuTools } from "../api";
-import { failure } from "../lib/errors";
+import { failure, gpuToolsSaveNext } from "../lib/errors";
 import type { GpuTools } from "../types";
 import Icon from "./Icon";
 
@@ -43,7 +43,7 @@ export default function GpuToolsForm({ open }: { open: boolean }) {
           : "Cleared. New jobs use the tools set in the server's environment.",
       );
     } catch (e) {
-      setError(failure("Could not save the GPU tools connection.", e, "Check the URL and try again."));
+      setError(failure("Could not save the GPU tools connection.", e, gpuToolsSaveNext(e)));
     } finally {
       setSaving(false);
     }
