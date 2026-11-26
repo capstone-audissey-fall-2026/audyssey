@@ -153,7 +153,8 @@ src/audyssey/
   toolserver.py  도구 서버
   cli.py         audyssey serve | audyssey tool-server
   media.py       ffmpeg 추출·프레임·WAV 입출력
-  ui/            시연용 화면 (/, 빌드 없음)
+  webui/         web/ 빌드 결과 (/, git 제외. 없으면 ui/로 대체)
+  ui/            이전 단일 파일 화면 (/legacy)
   devui/         개발용 화면 (/dev)
   tools/
     planning/    stub.py real.py llm.py      plan, validate_plan
@@ -167,3 +168,5 @@ docker/          app.Dockerfile, tools.Dockerfile
 compose.yaml     main + separation + judge + grounding + vllm
 tests/           unittest (GPU 코드는 가짜 torch/sam_audio로 검사)
 ```
+
+웹 앱 소스는 저장소 루트의 `web/`에 있습니다(`web/src`, 테스트는 `web/tests`, `npm run build`가 `src/audyssey/webui/`에 씁니다).

@@ -22,7 +22,11 @@ class ApiTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.video = make_video(self.root / "clip.mp4")
-        self.app = create_app(Settings(work_dir=self.root / "jobs"))
+        # No built web app here, so "/" is the single-file UI whether or not
+        # `npm run build` has been run in this checkout.
+        self.app = create_app(
+            Settings(work_dir=self.root / "jobs"), webui_dir=self.root / "no-webui"
+        )
         self.client = TestClient(self.app)
         self.addCleanup(self.client.close)
 
@@ -236,6 +240,29 @@ class ApiTests(unittest.TestCase):
         self.assertIn('id="board"', response.text)
         self.assertIn("내보내기", response.text)
         self.assertIn("Audyssey dev UI", self.client.get("/dev").text)
+
+    def test_root_falls_back_to_single_file_ui(self):
+        with tempfile.TemporaryDirectory() as empty:
+            client = TestClient(
+                create_app(Settings(work_dir=self.root / "jobs"), webui_dir=Path(empty))
+            )
+            self.addCleanup(client.close)
+            response = client.get("/")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="board"', response.text)
+
+    def test_root_serves_built_web_ui(self):
+        webui = self.root / "webui"
+        (webui / "assets").mkdir(parents=True)
+        (webui / "index.html").write_text('<div id="root"></div>')
+        (webui / "assets" / "app.js").write_text("console.log(1)")
+        client = TestClient(create_app(Settings(work_dir=self.root / "jobs"), webui_dir=webui))
+        self.addCleanup(client.close)
+        self.assertIn('id="root"', client.get("/").text)
+        self.assertEqual(client.get("/assets/app.js").status_code, 200)
+
+    def test_legacy_serves_single_file_ui(self):
+        self.assertIn('id="board"', self.client.get("/legacy").text)
 
     def test_trace_records_each_step_with_its_server(self):
         job = self.ready()

@@ -15,3 +15,5 @@ docs
 *.pt
 *.pth
 *.safetensors
+web/node_modules
+web/dist
