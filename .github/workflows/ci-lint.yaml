@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       # Caches uv's package downloads (keyed on uv.lock), not the venv: a cached venv points at
       # a Python that the next runner may not have, so uv would delete it and start over.
@@ -65,7 +65,7 @@ jobs:
   numpy-1x:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install UV
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
