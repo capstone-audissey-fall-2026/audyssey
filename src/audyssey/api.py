@@ -219,8 +219,17 @@ def create_app(
         """
         url = data.tools_url.strip().rstrip("/")
         if url:
-            parts = urlsplit(url)
-            if parts.scheme not in ("http", "https") or not parts.hostname:
+            try:
+                parts = urlsplit(url)
+                parts.port  # raises ValueError for a non-numeric or out-of-range port
+                httpx.URL(url)
+            except (ValueError, httpx.InvalidURL):
+                raise HTTPException(422, "tools_url must be an http(s) URL") from None
+            if (
+                parts.scheme not in ("http", "https")
+                or not parts.hostname
+                or any(c.isspace() for c in url)
+            ):
                 raise HTTPException(422, "tools_url must be an http(s) URL")
             if parts.username or parts.password:
                 raise HTTPException(422, "tools_url must not contain credentials")

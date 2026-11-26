@@ -110,6 +110,13 @@ class GpuToolsTests(unittest.TestCase):
             tools.judge(self.root / "m.wav", self.root / "t.wav", PLAN)
         self.assertEqual(str(post.call_args.args[0]), "http://gpu:8700/judge")
 
+    def test_malformed_urls_are_rejected_and_not_saved(self):
+        for url in ["http://host:abc", "http://host:99999", "http://[::1", "http://ho st:8700", "ftp://host", "http://"]:
+            with self.subTest(url=url):
+                self.assertEqual(self.save(url, "tok").status_code, 422)
+                self.assertEqual(self.client.get("/api/gpu-tools").json()["tools_url"], "")
+                self.assertEqual(self.client.get("/api/system").status_code, 200)
+
     def test_changing_while_a_job_is_busy_is_refused(self):
         lock = self.app.state.locks.setdefault("job", Lock())
         with lock:
