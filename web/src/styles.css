@@ -272,3 +272,4 @@ h1, h2, h3, p { margin: 0; }
   .top .modes .btn { flex: 1; }
   .tick.t1, .tick.t3, .tick.t5, .tick.t7 { display: none; }
 }
+.hl-box { position: absolute; border: 2px solid; border-radius: 2px; }
