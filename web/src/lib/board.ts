@@ -226,14 +226,17 @@ export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
       y: i * laneH,
       title: `${serverName(lane)}: ${lane.models.join(", ") || "ffmpeg"}`,
     })),
-    nodes: Object.keys(COL).map((step) => ({
-      step,
-      ...pos(step),
-      ...state[step],
-      idle: idle(step),
-      label: STEP_LABEL[step],
-      model: shorten(nodeModel(step), 13),
-    })),
+    // Idle nodes first: with every step on one server, the live node is drawn over the dimmed one.
+    nodes: Object.keys(COL)
+      .map((step) => ({
+        step,
+        ...pos(step),
+        ...state[step],
+        idle: idle(step),
+        label: STEP_LABEL[step],
+        model: shorten(nodeModel(step), 13),
+      }))
+      .sort((a, b) => Number(b.idle) - Number(a.idle)),
     edges,
     labels,
   };

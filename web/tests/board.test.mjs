@@ -51,6 +51,9 @@ test("boardLayout puts each step on the lane of its server; the path not taken i
   assert.ok(fresh.nodes.every((n) => !n.idle));
   assert.equal(boardLayout([], null).nodes.length, 9); // the default lanes
   assert.equal(layout.lanes[1].up, false);
+  // Steps that share a spot (everything on one server) are drawn idle first, so the live one is on top.
+  const idleFlags = layout.nodes.map((n) => n.idle);
+  assert.deepEqual(idleFlags, [...idleFlags].sort((a, b) => Number(b) - Number(a)));
 });
 
 test("edges carry video, audio and text; a retry loop shows only while it runs", async (context) => {

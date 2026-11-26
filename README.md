@@ -112,7 +112,7 @@ flowchart LR
 | 모듈 | 위치 | 담당 | 할 일 |
 |---|---|---|---|
 | 오케스트레이터·API | `graph.py`, `api.py`, `store.py` | 오케스트레이터 담당 | 소스별 병렬 처리, 자연어 명령 해석 |
-| UI | `ui/` (시연용), `devui/` (`/dev`) | UI 담당 | 소스 추가·설명 수정 화면, 최종 UI 다듬기 |
+| UI | `web/` (React 앱, 빌드 결과는 `src/audyssey/webui/`), `ui/` (`/legacy`), `devui/` (`/dev`) | UI 담당 | 2단계(클립 편집, 트랙 삭제, 400% 음량, 프로젝트 이름) |
 | 플래닝 | `tools/planning/real.py` | 플래닝 담당 | `plan`·`validate_plan` 개선, 모델 선택, 오디오 정보 반영 |
 | 분리 | `tools/separation/real.py` | 분리 담당 | 재시도 시 조건과 후보 수를 바꾸는 전략 |
 | 분리 검증 | `tools/filtering/real.py` | 필터링 담당 | 합격 기준 보정, 실패 이유와 수정 제안 생성 |

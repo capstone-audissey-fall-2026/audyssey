@@ -12,7 +12,20 @@ uv run audyssey serve
 
 - 모든 도구가 stub입니다. 유음 영상은 기존 분리·검증, 무음 영상은 대사를 건너뛰고 자동 생성·채점을 돌립니다.
 - 화면에서 단계를 누르면 그 단계의 모델 입력(프레임, 클립, 프롬프트, 오디오)과 출력이 보입니다. 결과 재생, 켜고 끄기, 음량, 피치, 다시 만들기, 합치기, 내보내기를 할 수 있습니다.
-- 설명을 고쳐 다시 분리하거나 소스를 추가하는 것은 개발용 화면(`/dev`)에서 합니다.
+- 설명 수정, 다시 분리, 소스 추가도 화면(`/`)에서 합니다. 이전 단일 파일 화면은 `/legacy`, 개발용 화면은 `/dev`입니다.
+
+### 웹 앱 (`web/`)
+
+화면은 `web/`의 Vite/React 앱이고, 빌드 결과는 `src/audyssey/webui/`(git 제외)에 생깁니다. FastAPI가 이 폴더가 있으면 `/`로 내보내고, 없으면 `src/audyssey/ui/index.html`을 내보냅니다. Docker 이미지는 Node 단계에서 빌드합니다.
+
+```bash
+export PATH=...  # Node 20.19 이상 (22 권장)
+cd web
+npm ci
+npm test            # node --test, Vite SSR
+npm run build       # ../src/audyssey/webui 에 씁니다
+npm run dev         # http://localhost:5173, /api는 127.0.0.1:8600으로 프록시합니다 (먼저 audyssey serve)
+```
 - 유음 영상을 생성·편집 없이 합친 WAV는 원본과 수치 오차 범위에서 같습니다.
 - 소스의 출처(분리/생성)를 확인하고, 비대사 분리 소스는 "생성으로 바꾸기", 생성 소스는 "다시 생성"으로 조작합니다. 소스 추가는 분리/생성을 고를 수 있으며 무음 영상은 생성만 지원합니다.
 - 무음 샘플: `ffmpeg -i samples/sample.mp4 -an -c:v copy /tmp/silent.mp4`로 만든 영상을 업로드합니다. 대사는 "대사는 생성하지 않음"으로 표시됩니다.
