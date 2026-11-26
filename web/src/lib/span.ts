@@ -39,3 +39,7 @@ export function removeSpan(spans: Span[], index: number): Span[] {
 export function sortSpans(spans: Span[]): Span[] {
   return [...spans].sort((a, b) => a.start - b.start || a.end - b.end);
 }
+
+export function formatSpan(span: Span): string {
+  return `${span.start.toFixed(1)}–${span.end.toFixed(1)} s`;
+}

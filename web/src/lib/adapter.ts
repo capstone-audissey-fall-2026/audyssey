@@ -6,6 +6,7 @@ export interface SpanBox { id: string; start: number; end: number }
 export interface TrackRow {
   id: string;
   name: string;
+  description: string;
   kind: SourceKind;
   origin: "separated" | "generated";
   status: SourceStatus;
@@ -50,6 +51,7 @@ export function jobToView(job: Job): JobView {
     return {
       id: s.id,
       name: s.plan.name,
+      description: s.plan.description,
       kind: s.plan.kind,
       origin: s.origin,
       status: s.status,

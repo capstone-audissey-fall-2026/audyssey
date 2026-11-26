@@ -27,12 +27,15 @@ const PER_SOURCE = new Set(["separate", "generate", "judge", "score"]);
 const stepKey = (key: string) => key.split(":")[0];
 
 export function statusLine(job: Job | null, busy: string | null): StatusLine {
-  if (busy) return { tone: "run", text: BUSY_TEXT[busy] ?? "Working…", progress: null };
-  if (!job) return { tone: "idle", text: "Open a video to start.", progress: null };
-  if (job.state === "new") return { tone: "idle", text: "Choose Separate or Generate to start.", progress: null };
-  if (job.state === "failed") return { tone: "fail", text: job.error || "Something went wrong. Try again.", progress: null };
+  if (busy && BUSY_TEXT[busy]) return { tone: "run", text: BUSY_TEXT[busy], progress: null };
+  if (!job) return busy ? { tone: "run", text: "Working…", progress: null } : { tone: "idle", text: "Open a video to start.", progress: null };
+  // A change in progress reports the step that runs, whatever the job state says.
+  if (!busy) {
+    if (job.state === "new") return { tone: "idle", text: "Choose Separate or Generate to start.", progress: null };
+    if (job.state === "failed") return { tone: "fail", text: job.error || "Something went wrong. Try again.", progress: null };
+  }
   const tracks = job.sources.filter((s) => s.status !== "skipped").length;
-  if (job.state === "ready") {
+  if (job.state === "ready" && !busy) {
     if (tracks === 0) return { tone: "done", text: "Done. No sound sources found.", progress: null };
     return { tone: "done", text: `Done. ${tracks} ${tracks === 1 ? "track" : "tracks"} ready to play.`, progress: null };
   }

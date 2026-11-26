@@ -35,5 +35,9 @@ test("statusLine describes the job in one line", async (context) => {
   assert.deepEqual([done.tone, done.text], ["done", "Done. 3 tracks ready to play."]);
   assert.equal(statusLine(job({ sources: [source("s1")] }), null).text, "Done. 1 track ready to play.");
 
+  // A change in progress reports its running step; with none running it says Working.
+  const adding = statusLine(job({ sources: three, steps: [step("separate:s4", "running")] }), "Adding track");
+  assert.deepEqual([adding.tone, adding.text], ["run", "Separating 1 of 3"]);
+  assert.equal(statusLine(job(), "Adding track").text, "Working…");
   assert.deepEqual(statusLine(job(), "export"), { tone: "run", text: "Exporting…", progress: null });
 });

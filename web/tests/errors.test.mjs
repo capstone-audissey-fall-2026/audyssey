@@ -21,7 +21,7 @@ test("errorDetail unwraps the backend detail; failure adds what and next", async
   const long = failure("Failed.", new Error("x".repeat(500)), "Retry.");
   assert.equal(long, `Failed. ${"x".repeat(160)}… Retry.`);
 
-  const next = "Check the tools server, then press Regenerate.";
+  const next = "Check the tools server, then try again.";
   assert.equal(
     trackFailureText("Audyssey tools server unreachable at http://127.0.0.1:8700: [Errno 111] Connection refused"),
     `Audyssey tools server unreachable. ${next}`,
@@ -33,6 +33,6 @@ test("errorDetail unwraps the backend detail; failure adds what and next", async
   // Not a tools-server failure: the detail alone, no tools-server hint.
   assert.equal(trackFailureText("원본 오디오가 없어 분리할 수 없습니다. 생성으로 바꾸세요."), "원본 오디오가 없어 분리할 수 없습니다. 생성으로 바꾸세요.");
   assert.equal(trackFailureText("boom"), "boom.");
-  assert.equal(trackFailureText(null), `Generation failed. ${next}`);
+  assert.equal(trackFailureText(null), `This track failed. ${next}`);
   assert.equal(trackFailureText("x".repeat(500)), `${"x".repeat(160)}…`);
 });

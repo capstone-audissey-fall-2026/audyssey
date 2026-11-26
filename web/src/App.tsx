@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { exportUrl, listJobs, sendCommand, startJob, uploadVideo } from "./api";
 import OpenVideoDialog from "./components/OpenVideoDialog";
 import TopBar from "./components/TopBar";
+import VideoEditor from "./components/VideoEditor";
 import { errorText, useJob } from "./lib/useJob";
 import type { Job, Method } from "./types";
 
@@ -80,7 +81,7 @@ export default function App() {
         onStart={start}
         onExport={exportMix}
       />
-      <main className="main">{job ? null : <p className="dlg-empty">Open a video to start.</p>}</main>
+      {job ? <VideoEditor busy={busy} job={job} key={job.id} receive={receive} run={run} /> : <p className="empty-video">Open a video to start.</p>}
       <OpenVideoDialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}

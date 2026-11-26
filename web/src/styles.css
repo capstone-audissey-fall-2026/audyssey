@@ -273,3 +273,14 @@ h1, h2, h3, p { margin: 0; }
   .tick.t1, .tick.t3, .tick.t5, .tick.t7 { display: none; }
 }
 .hl-box { position: absolute; border: 2px solid; border-radius: 2px; }
+.stepper { display: inline-flex; align-items: center; gap: 4px; }
+.stepper output { min-width: 4ch; text-align: center; font-variant-numeric: tabular-nums; }
+.judge p { margin: 0; font-size: 0.8125rem; }
+.judge .hint, .plan .hint { color: var(--muted); font-size: 0.75rem; }
+.plan { gap: 8px; }
+.plan-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.plan-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.plan-name { font-weight: 600; }
+.plan-spans { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.plan-issues { margin: 0; padding-inline-start: 18px; font-size: 0.8125rem; }
+.plan h3 { font-size: 0.8125rem; margin-top: 4px; }
