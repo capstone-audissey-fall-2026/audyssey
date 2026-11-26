@@ -175,7 +175,7 @@ Pod에서는 tools 이미지 하나가 도구 4개(분리·Judge·그라운딩·
    ```
    - **화면에서 연결 (재시작 불필요)**: 영상 열기 창의 **GPU tools**에 `Tools server URL`(`https://<POD-ID>-8700.proxy.runpod.net`)과 `Token`을 넣고 Save를 누릅니다. 저장하면 분리·Judge·그라운딩·생성 4개가 모두 이 서버로 연결(remote)되고, 새 작업과 이후의 편집 명령부터 적용됩니다. 토큰칸을 비워 두면 저장된 토큰을 그대로 쓰고, URL을 비우고 저장하면 연결이 해제되어 `.env` 값으로 돌아갑니다. 작업이 실행 중이면 저장할 수 없습니다(409).
    - **`.env`로 연결**: 3번의 주소·토큰을 넣고 `docker compose up -d main`을 다시 실행합니다. 화면에서 저장한 값이 있으면 그 값이 `.env`보다 우선합니다.
-   - 연결 상태는 화면의 서버 상태(분리·Judge·그라운딩·생성 줄)로 봅니다. 토큰이 틀리면 서버 상태는 정상으로 보이고(`/health`는 인증이 없음) 작업을 돌릴 때 `tool server <주소>/separate failed: 401`로 실패합니다.
+   - 연결 상태는 화면의 서버 상태 막대에서 'Tool server (<호스트>)' 한 줄(점이 초록이면 /health 응답)과 'Servers n/m up'으로 봅니다. 토큰이 틀리면 서버 상태는 정상으로 보이고(`/health`는 인증이 없음) 작업을 돌릴 때 `tool server <주소>/separate failed: 401`로 실패합니다.
 5. 끝나면 노트북에서 `docker compose down`, RunPod에서 **Pod를 Stop/Terminate**합니다. 켜 둔 시간만큼 요금이 나갑니다. 볼륨은 남습니다.
 
 ### GPU 호스트에서 도구만 띄우기
