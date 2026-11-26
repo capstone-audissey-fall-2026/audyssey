@@ -48,5 +48,3 @@ jobs:
             ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:${{ github.sha }}
           cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:buildcache
           cache-to: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:buildcache,mode=max,compression=zstd,compression-level=3,force-compression=true
-          outputs: |
-            type=image,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
