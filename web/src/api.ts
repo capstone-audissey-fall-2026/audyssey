@@ -40,6 +40,8 @@ export const sendCommand = (id: string, cmd: Command) => post<Job>(`/api/jobs/${
 export const getTrace = (id: string) => request<TraceCall[]>(`/api/jobs/${id}/trace`);
 export const getSystem = () => request<Lane[]>("/api/system");
 export const routeRequest = (id: string, text: string) => post<RouteResult>(`/api/jobs/${id}/route`, { request: text });
+// Which router answers /route; the edit bar is off for "stub".
+export const getRouter = () => request<{ router: string }>("/api/router");
 export const exportUrl = (id: string) => `/api/jobs/${id}/export`;
 export const fileUrl = (id: string, path: string) =>
   `/api/jobs/${id}/files/${path.split("/").map(encodeURIComponent).join("/")}`;

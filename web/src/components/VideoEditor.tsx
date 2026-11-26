@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
-import { fileUrl, sendCommand } from "../api";
+import { fileUrl, getRouter, getSystem, getTrace, sendCommand } from "../api";
 import { jobToView } from "../lib/adapter";
 import { AudioEngine } from "../lib/audioEngine";
 import { highlightChip, visibleBoxes } from "../lib/highlight";
@@ -8,8 +8,11 @@ import { PendingEdits } from "../lib/pendingEdits";
 import { reconcileSelection, transportAction } from "../lib/selection";
 import { removeSpan } from "../lib/span";
 import { engineTracks, keepCommands, regenerateBlockedReason, withRender } from "../lib/trackActions";
-import type { Command, Job, Span } from "../types";
+import type { Command, Job, Lane, Span, TraceCall } from "../types";
+import EditBar from "./EditBar";
+import Inspector, { EdgePopover } from "./Inspector";
 import NewTrackPanel from "./NewTrackPanel";
+import PipelineBoard from "./PipelineBoard";
 import PlanPanel from "./PlanPanel";
 import SelectedTrackPanel from "./SelectedTrackPanel";
 import Stage from "./Stage";
@@ -36,6 +39,34 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
   const [, bump] = useReducer((n: number) => n + 1, 0);
   const [draft, setDraft] = useState<Span[] | null>(null);
   const disabled = regenerateBlockedReason(job, busy);
+  const [lanes, setLanes] = useState<Lane[]>([]);
+  const [trace, setTrace] = useState<TraceCall[]>([]);
+  const [router, setRouter] = useState<string | null>(null);
+  const [step, setStep] = useState<string | null>(null);
+  const [edge, setEdge] = useState<{ key: string; x: number; y: number } | null>(null);
+  const [target, setTarget] = useState<string | null>(null);
+
+  // Which servers run what, refreshed every 15 s; and which router answers edit requests.
+  useEffect(() => {
+    const load = () => void getSystem().then(setLanes, () => {});
+    load();
+    void getRouter().then((r) => setRouter(r.router), () => setRouter("unknown"));
+    const timer = setInterval(load, 15000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // The trace follows the job; a burst of updates is read once.
+  useEffect(() => {
+    const timer = setTimeout(() => void getTrace(job.id).then(setTrace, () => {}), 200);
+    return () => clearTimeout(timer);
+  }, [job.id, job.version]);
+
+  useEffect(() => {
+    if (edge === null) return;
+    const onKey = (event: KeyboardEvent) => event.key === "Escape" && setEdge(null);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [edge]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -137,7 +168,19 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
       : null;
 
   return (
-    <div className="wrap">
+    <div className="editor">
+      <PipelineBoard
+        edge={edge?.key ?? null}
+        job={job}
+        lanes={lanes}
+        onEdge={(key, x, y) => setEdge(edge?.key === key ? null : { key, x, y })}
+        onStep={(next) => {
+          setEdge(null);
+          setStep(next);
+        }}
+        step={step}
+      />
+      <div className="wrap">
       <section className="stage panel" aria-label="Video">
         <Stage
           boxes={visibleBoxes(view.rows, job.sources, selected, time)}
@@ -190,6 +233,14 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
         ) : null}
         <PlanPanel job={job} onSeek={(t) => engine?.seek(t)} />
       </aside>
+      <EditBar
+        disabled={disabled}
+        job={job}
+        onRun={async (label, commands) => !!(await exec(label, commands))}
+        onTarget={setTarget}
+        router={router}
+        view={view}
+      />
       <Timeline
         audioVersion={audioVersion}
         disabled={disabled}
@@ -215,9 +266,20 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
         pending={pending}
         selected={selected}
         solo={solo}
+        target={target}
         time={time}
         view={view}
       />
+      </div>
+      <Inspector
+        calls={trace}
+        job={job}
+        lane={lanes.find((l) => step !== null && l.steps.includes(step))}
+        onClose={() => setStep(null)}
+        open={step !== null}
+        step={step}
+      />
+      {edge ? <EdgePopover calls={trace} edge={edge.key} job={job} onClose={() => setEdge(null)} x={edge.x} y={edge.y} /> : null}
     </div>
   );
 }

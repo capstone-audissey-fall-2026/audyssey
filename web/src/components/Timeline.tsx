@@ -26,6 +26,7 @@ interface TimelineProps {
   // Why changes are unavailable right now (a command or the job is running); null when they are allowed.
   disabled: string | null;
   jobRunning?: boolean;
+  target?: string | null; // the lane an edit request is about
   // The new track being drafted, drawn on its own lane below the sources.
   draftSpans?: Span[];
   onDraftSpansChange?: (spans: Span[]) => void;
@@ -68,6 +69,7 @@ export default function Timeline({
   onKeepChange,
   disabled,
   jobRunning = false,
+  target = null,
   draftSpans,
   onDraftSpansChange,
   onAddTrack,
@@ -272,7 +274,7 @@ export default function Timeline({
         const reason = spanReason(row);
         return (
           <div
-            className={isSelected ? "lane sel" : "lane"}
+            className={`${isSelected ? "lane sel" : "lane"}${target === row.id ? " target" : ""}`}
             data-source={row.id}
             key={row.id}
             onClick={() => onSelect(row.id)}
@@ -355,7 +357,7 @@ export default function Timeline({
         );
       })}
       {residual ? (
-        <div className={selected === RESIDUAL ? "lane sel" : "lane"} data-source={RESIDUAL} onClick={() => onSelect(RESIDUAL)} style={{ "--oc": NONE_COLOR } as CSSProperties} data-obj="none">
+        <div className={`${selected === RESIDUAL ? "lane sel" : "lane"}${target === RESIDUAL ? " target" : ""}`} data-source={RESIDUAL} onClick={() => onSelect(RESIDUAL)} style={{ "--oc": NONE_COLOR } as CSSProperties} data-obj="none">
           <div className="lane-head">
             <button aria-current={selected === RESIDUAL ? "true" : "false"} className="lh-main" type="button">
               <span className="lh-name">
