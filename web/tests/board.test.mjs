@@ -71,6 +71,16 @@ test("edges carry video, audio and text; a retry loop shows only while it runs",
   assert.match(edge.d, /^M /);
 });
 
+test("modelText shortens the model only when a count shares the line; nodes are 108 wide", async (context) => {
+  const { boardLayout, modelText } = await (await ssr(context)).ssrLoadModule("/src/lib/board.ts");
+  const short = modelText("sam-audio-large-tv", "4/4");
+  assert.equal(short.length, 12);
+  assert.ok(short.endsWith("…"));
+  assert.equal(modelText("ffmpeg", "Round 2"), "ffmpeg");
+  assert.equal(modelText("sam-audio-large-tv", ""), "sam-audio-large-tv");
+  assert.equal(boardLayout(lanes, null).nodeW, 108);
+});
+
 test("PipelineBoard draws the steps as buttons and opens while the job runs", async (context) => {
   const { default: PipelineBoard } = await (await ssr(context)).ssrLoadModule("/src/components/PipelineBoard.tsx");
   const props = { lanes, step: null, edge: null, onStep() {}, onEdge() {} };
@@ -78,6 +88,9 @@ test("PipelineBoard draws the steps as buttons and opens while the job runs", as
   assert.match(running, /<svg[^>]*class="flow"|<svg[^>]*id="board"/);
   assert.match(running, /role="button"[^>]*aria-label="Plan, [^"]*Running"/);
   assert.match(running, /aria-expanded="true"/);
+  const round2 = renderToStaticMarkup(createElement(PipelineBoard, { ...props, job: job({ state: "running", steps: [step("plan", "running", { round: 2, max_rounds: 3 })] }) }));
+  const plan = (await (await ssr(context)).ssrLoadModule("/src/lib/board.ts")).boardLayout(lanes, null).nodes.find((n) => n.step === "plan");
+  assert.match(round2, new RegExp(`<text class="count" text-anchor="end" x="${plan.x + 108 - 10}" y="${plan.y + 35}">Round 2</text>`));
   assert.match(running, /Pipeline/);
   const ready = renderToStaticMarkup(createElement(PipelineBoard, { ...props, job: job({ state: "ready", steps: [step("plan", "done")] }) }));
   assert.match(ready, /aria-expanded="false"/);

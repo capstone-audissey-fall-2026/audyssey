@@ -1,5 +1,5 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import { DATA_LABEL, STATUS_LABEL, STEP_LABEL, boardLayout } from "../lib/board";
+import { DATA_LABEL, STATUS_LABEL, STEP_LABEL, boardLayout, modelText } from "../lib/board";
 import type { Job, Lane } from "../types";
 
 interface PipelineBoardProps {
@@ -98,7 +98,7 @@ export default function PipelineBoard({ job, lanes, step: openStep, edge: openEd
               >
                 <rect className="box" height={board.nodeH} rx="10" width={board.nodeW} x={node.x} y={node.y} />
                 <text className="label" x={node.x + 11} y={node.y + 19}>{node.label}</text>
-                <text className="model" x={node.x + 11} y={node.y + 35}>{node.model}</text>
+                <text className="model" x={node.x + 11} y={node.y + 35}>{modelText(node.model, node.sub)}</text>
                 {node.status !== "pending" ? (
                   <g className={`badge ${node.status}`} transform={`translate(${node.x + board.nodeW - 14} ${node.y + 15})`}>
                     <circle r="7" />
@@ -106,7 +106,7 @@ export default function PipelineBoard({ job, lanes, step: openStep, edge: openEd
                   </g>
                 ) : null}
                 {node.sub ? (
-                  <text className="count" textAnchor="end" x={node.x + board.nodeW - 26} y={node.y + 19}>{node.sub}</text>
+                  <text className="count" textAnchor="end" x={node.x + board.nodeW - 10} y={node.y + 35}>{node.sub}</text>
                 ) : null}
               </g>
             );

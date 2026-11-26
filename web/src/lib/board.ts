@@ -115,6 +115,8 @@ const PRETTY: Record<string, string> = {
   "internal-model": "Internal",
 };
 const shorten = (text: string, n: number) => (text.length > n ? `${text.slice(0, n - 1)}…` : text);
+// With a count on the model line, keep the model clear of it.
+export const modelText = (model: string, sub: string) => (sub ? shorten(model, Math.max(4, 15 - sub.length)) : model);
 const serverName = (lane: Lane) => lane.name.replace(/^vLLM \(.+\)$/, "vLLM").replace(/ \((.+):\d+\)$/, " $1");
 
 export interface BoardNode { step: string; x: number; y: number; status: NodeStatus; sub: string; idle: boolean; label: string; model: string }
@@ -132,7 +134,7 @@ export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
   const idle = (step: string) => (["generate", "score"].includes(step) && !generating) || (["separate", "judge", "residual"].includes(step) && !separating);
   const lanes = (lanesIn.length ? lanesIn : DEFAULT_LANES).filter((l) => l.steps.some((s) => s in COL));
   const row = (step: string) => Math.max(0, lanes.findIndex((l) => l.steps.includes(step)));
-  const labelW = 150, colW = 124, nodeW = 96, nodeH = 46, laneH = 62, left = labelW + 18, gap = 4, r = 8;
+  const labelW = 150, colW = 124, nodeW = 108, nodeH = 46, laneH = 62, left = labelW + 18, gap = 4, r = 8;
   // A step that shares its column with an earlier step of the same lane (generate with separate, score with judge) takes a second row.
   const order = Object.keys(COL);
   const sub = (step: string) => order.filter((s) => COL[s] === COL[step] && row(s) === row(step) && order.indexOf(s) < order.indexOf(step)).length;
