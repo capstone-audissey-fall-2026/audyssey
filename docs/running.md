@@ -129,7 +129,7 @@ nvidia-smi                # 메모리가 비었는지 확인
 
 ### B. 노트북 + RunPod
 
-Pod에서는 tools 이미지 하나가 도구 4개(분리·Judge·그라운딩·생성)를 한 프로세스로 띄우고, 노트북에서는 main(화면과 흐름)만 띄웁니다. RunPod Pod 안에서는 Docker Compose를 쓸 수 없어서 이렇게 나눕니다.
+Pod에서는 tools 이미지 하나가 도구 4개(분리·Judge·그라운딩·생성)를 한 프로세스로 띄우고, 노트북에서는 main(화면과 흐름)만 띄웁니다. RunPod Pod 안에서는 Docker Compose를 쓸 수 없어서 이렇게 나눕니다. 도구 서버 하나가 4개를 모두 처리하므로 연결할 주소도 하나입니다. 같은 구성을 내 GPU 서버(sv3 등)에서 [Compose 파일 하나](#gpu-호스트에서-도구만-띄우기)로 띄워 쓸 수도 있습니다.
 
 **B-1. 가중치용 네트워크 볼륨 만들기 (팀에서 처음 한 번)**
 1. RunPod → Storage → New Network Volume. 크기 60GB 이상(vLLM 플래너 가중치까지면 70GB), GPU를 빌릴 데이터센터와 같은 곳을 고릅니다.
@@ -156,23 +156,45 @@ Pod에서는 tools 이미지 하나가 도구 4개(분리·Judge·그라운딩·
 **B-3. 쓸 때마다**
 1. 위 템플릿 + 네트워크 볼륨으로 GPU Pod를 만듭니다. GPU는 48GB 이상(시각 힌트를 켜면 80GB), CUDA 12.8 이상 드라이버.
 2. Pod 로그에 `Uvicorn running on http://0.0.0.0:8700`이 뜨면 준비 끝입니다. 확인: `curl https://<POD-ID>-8700.proxy.runpod.net/health` → `{"tools":["separation","filtering","grounding","generation"],"impl":"real"}`
-3. 노트북에서 레포를 받고(`git clone ...`, `cp .env.example .env`) `.env`에 다음을 넣습니다.
+3. 노트북에서 레포를 받고(`git clone ...`, `cp .env.example .env`) 플래너만 `.env`에 넣습니다(Gemini 예). 도구 서버 주소와 토큰은 4번의 화면에서 넣거나, 다음 줄처럼 `.env`에 넣습니다.
    ```dotenv
+   AUDYSSEY_PLANNER_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+   AUDYSSEY_PLANNER_MODEL=gemini-3.5-flash-lite
+   GOOGLE_API_KEY=<키>
+   # 화면 대신 .env로 연결할 때만: 주소 4개는 같은 값이고 토큰은 Pod와 같은 값
    AUDYSSEY_TOOL_TOKEN=<Pod와 같은 토큰>
    AUDYSSEY_SEPARATOR_URL=https://<POD-ID>-8700.proxy.runpod.net
    AUDYSSEY_FILTER_URL=https://<POD-ID>-8700.proxy.runpod.net
    AUDYSSEY_GROUNDING_URL=https://<POD-ID>-8700.proxy.runpod.net
    AUDYSSEY_GENERATOR_URL=https://<POD-ID>-8700.proxy.runpod.net
-   AUDYSSEY_PLANNER_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-   AUDYSSEY_PLANNER_MODEL=gemini-3.5-flash-lite
-   GOOGLE_API_KEY=<키>
    ```
-4. 노트북에서 main만 띄웁니다(노트북에는 GPU가 필요 없음).
+4. 노트북에서 main만 띄우고(노트북에는 GPU가 필요 없음) 도구 서버에 연결합니다.
    ```bash
    docker compose up -d main
    # http://localhost:8600
    ```
+   - **화면에서 연결 (재시작 불필요)**: 영상 열기 창의 **GPU tools**에 `Tools server URL`(`https://<POD-ID>-8700.proxy.runpod.net`)과 `Token`을 넣고 Save를 누릅니다. 저장하면 분리·Judge·그라운딩·생성 4개가 모두 이 서버로 연결(remote)되고, 새 작업과 이후의 편집 명령부터 적용됩니다. 토큰칸을 비워 두면 저장된 토큰을 그대로 쓰고, URL을 비우고 저장하면 연결이 해제되어 `.env` 값으로 돌아갑니다. 작업이 실행 중이면 저장할 수 없습니다(409).
+   - **`.env`로 연결**: 3번의 주소·토큰을 넣고 `docker compose up -d main`을 다시 실행합니다. 화면에서 저장한 값이 있으면 그 값이 `.env`보다 우선합니다.
+   - 연결 상태는 화면의 서버 상태(분리·Judge·그라운딩·생성 줄)로 봅니다. 토큰이 틀리면 서버 상태는 정상으로 보이고(`/health`는 인증이 없음) 작업을 돌릴 때 `tool server <주소>/separate failed: 401`로 실패합니다.
 5. 끝나면 노트북에서 `docker compose down`, RunPod에서 **Pod를 Stop/Terminate**합니다. 켜 둔 시간만큼 요금이 나갑니다. 볼륨은 남습니다.
+
+### GPU 호스트에서 도구만 띄우기
+
+내 GPU 서버(sv3 등)에서 RunPod Pod와 같은 구성(도구 4개를 컨테이너 하나로)을 띄우고, 화면(main)은 노트북에서 돌립니다. A와 달리 vLLM과 main이 없어서 GPU 한 장에 컨테이너 하나만 올라갑니다.
+
+```bash
+# GPU 호스트: .env는 A-1과 같고, 아래 두 값을 정합니다 (AUDYSSEY_TOOL_TOKEN과 HF_CACHE도 필요)
+#   AUDYSSEY_TOOLS_GPU=<아무 프로세스도 없는 GPU 번호>   기본 0
+#   AUDYSSEY_TOOLS_PORT=<공개할 포트>                    기본 8700
+docker compose -f compose.tools.yaml up -d
+curl localhost:8700/health      # {"tools":["separation","filtering","grounding","generation"],"impl":"real"}
+docker compose -f compose.tools.yaml down   # 끝나면
+```
+
+- 컨테이너 안에서는 `0.0.0.0:8700`으로 뜨고, 호스트에는 `AUDYSSEY_TOOLS_PORT`로 모든 인터페이스에 공개됩니다. 토큰(`AUDYSSEY_TOOL_TOKEN`)이 없으면 시작하지 않습니다.
+- 토큰은 평문 HTTP로 오갑니다. 같은 네트워크 밖에서 쓰면 방화벽으로 막거나, 노트북에서 `ssh -L 8700:localhost:8700 <서버>`를 열고 URL에 `http://localhost:8700`을 넣습니다.
+- 노트북에서는 B-3 3~4번대로 화면 또는 `.env`에 이 주소와 같은 토큰을 넣습니다.
+- A의 전체 구성(`docker compose up`)과 함께 올리면 같은 모델이 GPU에 두 번 올라가므로 하나만 띄웁니다.
 
 ### 자주 막히는 곳
 
@@ -418,6 +440,8 @@ API의 `analyze()`와 Studio는 같은 `build_graph()`로 생성한 그래프를
 | `AUDYSSEY_TOOL_TOKEN` | 빈 값 | 도구 서버 Bearer 토큰. main과 도구 서버에 같은 값 |
 | `AUDYSSEY_REMOTE_TIMEOUT_S` | `600` | 원격 도구 호출 제한 시간(초) |
 | `AUDYSSEY_VISUAL_PROMPT` | `false` | 시각 힌트 사용. 켜면 계획 검증에서 SAM3 `locate`, 분리 전 `mask_video`를 실행하고 마스크 영상을 분리에 넣음 |
+
+화면의 **GPU tools**(`GET`·`POST /api/gpu-tools`)는 위의 도구 주소와 `AUDYSSEY_TOOL_TOKEN`을 앱 프로세스 안에서 덮어씁니다. 값은 메모리에만 있어서 앱을 다시 띄우면 사라지고 환경변수로 돌아갑니다. URL을 저장하면 도구 모드가 `stub`·`real`이어도 4개 모두 `remote`로 바뀌고(응답의 `remote`로 확인), 빈 URL을 저장하면 환경변수 설정으로 돌아갑니다. 토큰은 어떤 응답에도 나오지 않고(`token_set`만 반환) 브라우저에도 저장하지 않습니다. 새 환경변수는 없습니다. 도구만 띄우는 [`compose.tools.yaml`](../compose.tools.yaml)의 `AUDYSSEY_TOOLS_GPU`, `AUDYSSEY_TOOLS_PORT`는 Compose 변수입니다.
 
 **플래너**
 
