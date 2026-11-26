@@ -17,10 +17,8 @@ from audyssey.routing_eval import (
     run_eval,
     uncached_calls,
 )
-from audyssey.routing_improve import improve
 from audyssey.settings import Settings
 from audyssey.tools.routing import cache_salt, load_router, model_name
-from audyssey.tools.routing.real import route as real_route
 from audyssey.toolserver import create_tool_app
 
 
@@ -198,6 +196,10 @@ def improve_routing(
     except ValidationError as exc:
         # The message only: the full error echoes the input, which can hold keys.
         raise fail(exc.errors()[0]["msg"]) from None
+    # LLM SDKs are optional; the GPU tool server only installs audyssey[ui].
+    from audyssey.routing_improve import improve
+    from audyssey.tools.routing.real import route as real_route
+
     effort, fmt = settings.router_reasoning_effort, settings.router_format
     improve(
         lambda d: (
