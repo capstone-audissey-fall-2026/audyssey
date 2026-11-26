@@ -73,6 +73,13 @@ class RemoteTests(unittest.TestCase):
         graph.handle_command(job, Render(), ctx)
         np.testing.assert_allclose(read_wav(directory / job.outputs.mix_wav), read_wav(directory / job.audio_path), atol=1e-6)
 
+    def test_older_separator_falls_back_to_single_requests(self):
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_BATCH_SIZE="4"):
+            job, _, _ = self.analyze()
+        self.assertEqual(job.state, "ready", job.error)
+        self.assertEqual([source.attempts for source in job.sources], [2, 1, 1])
+        self.assertTrue(all(source.filter.passed for source in job.sources))
+
     def assert_failed_sources(self, job, expected):
         self.assertEqual(job.state, 'ready')
         self.assertEqual([s.status for s in job.sources], ['failed'] * 3)

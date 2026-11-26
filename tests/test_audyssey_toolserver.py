@@ -148,3 +148,54 @@ class ToolServerTests(unittest.TestCase):
         for endpoint, files, data in cases:
             response = client.post(endpoint, files=files, data=data)
             self.assertEqual(response.status_code, 413, response.text)
+
+    def test_batch_remote_returns_ordered_wavs(self):
+        from audyssey.tools.separation import remote
+
+        second = self.plan.model_copy(update={"description": "footstep"})
+        outs = [self.root / "a.wav", self.root / "b.wav"]
+        with TestClient(create_tool_app(["separation"], "real", "t")) as client:
+            def fake_separate_batch(mono, plans, outputs, attempt):
+                self.assertEqual(plans, [self.plan, second])
+                self.assertEqual(attempt, 1)
+                self.assertEqual(mono.read_bytes(), self.mono.read_bytes())
+                return [write_wav(out, np.full(48000, index)) for index, out in enumerate(outputs)]
+
+            def post(url, endpoint, files, data, token, timeout):
+                self.assertEqual(endpoint, "/separate_batch")
+                response = client.post(endpoint, files=files, data=data,
+                                       headers={"Authorization": f"Bearer {token}"})
+                response.raise_for_status()
+                return response
+
+            with patch.dict("os.environ", AUDYSSEY_TOOL_TOKEN="t"):
+                with patch.object(remote, "post", post), patch(
+                    "audyssey.tools.separation.real.separate_batch", fake_separate_batch
+                ):
+                    self.assertEqual(remote.separate_batch(self.mono, [self.plan, second], outs, 1), outs)
+            np.testing.assert_array_equal(read_wav(outs[0]), 0)
+            np.testing.assert_array_equal(read_wav(outs[1]), 1)
+            self.assertEqual(client.post("/separate_batch").status_code, 401)
+
+    def test_batch_accepts_32_source_plans(self):
+        import json
+
+        files = {"mono": self.files["mono"]}
+        headers = {"Authorization": "Bearer t"}
+        plan = self.plan.model_dump(mode="json")
+
+        def separate_batch(mono, plans, outputs, attempt):
+            self.assertEqual(len(plans), 32)
+            for out in outputs:
+                out.write_bytes(b"wav")
+            return outputs
+
+        with patch(
+            "audyssey.tools.separation.real.separate_batch", separate_batch
+        ), TestClient(create_tool_app(["separation"], "real", "t")) as client:
+            for count, status in ((32, 200), (33, 422)):
+                response = client.post(
+                    "/separate_batch", files=files, headers=headers,
+                    data={"plans": json.dumps([plan] * count), "attempt": "1"},
+                )
+                self.assertEqual(response.status_code, status)

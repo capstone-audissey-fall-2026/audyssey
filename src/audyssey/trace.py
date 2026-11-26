@@ -184,6 +184,7 @@ TOOL_STEPS = {
     "plan": "plan",
     "validate_plan": "validate_plan",
     "separate": "separate",
+    "separate_batch": "separate",
     "judge": "judge",
     "locate": "ground",
     "mask_video": "ground",
@@ -210,7 +211,12 @@ def wrap_tools(tools: Any, directory: Path, settings: Settings) -> Any:
         return run
 
     return replace(
-        tools, **{f.name: wrap(f.name, getattr(tools, f.name)) for f in fields(tools)}
+        tools,
+        **{
+            field.name: wrap(field.name, fn)
+            for field in fields(tools)
+            if (fn := getattr(tools, field.name)) is not None
+        },
     )
 
 

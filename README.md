@@ -97,6 +97,25 @@ flowchart LR
 
 문제가 생기면 [자주 막히는 곳](docs/running.md#자주-막히는-곳)을, 설정 값은 [설정 표](docs/running.md#설정-환경변수)를 참고합니다.
 
+### Hydrogen AV · SAM Audio 배치 · TF32
+
+기존 분리 파이프라인에서 Hydrogen AV와 GPU 배치를 사용하려면 `.env`에 아래 값을 설정합니다. OpenRouter 키는 `AUDYSSEY_PLANNER_API_KEY`로 공급합니다.
+
+```dotenv
+AUDYSSEY_PLANNER_API=openrouter
+AUDYSSEY_PLANNER_BASE_URL=https://openrouter.ai/api/v1
+AUDYSSEY_PLANNER_MODEL=google/gemini-4-hydrogen
+AUDYSSEY_PLANNER_INPUT=video
+AUDYSSEY_PLANNER_VIDEO_AUDIO=true
+AUDYSSEY_SAM_AUDIO_BATCH_SIZE=32
+AUDYSSEY_SAM_AUDIO_ALLOW_TF32=true
+```
+
+- [플래너](src/audyssey/tools/planning/prompts.py)와 검수기는 기존 프롬프트와 검수 규칙을 사용합니다. 검수기 모델을 따로 지정하지 않으면 Hydrogen을 상속하며, 분리 검수 입력은 기본적으로 오디오입니다.
+- [분리 그래프](src/audyssey/graph.py)는 검수를 통과한 소스의 첫 요청을 묶습니다. [SAM Audio](src/audyssey/tools/separation/real.py)는 각 소스에 전체 음원과 해당 소스의 `description` 및 타임스팬 앵커를 전달합니다. Judge, 재시도, 시각 마스크 입력은 소스별로 처리합니다.
+- CUDA 메모리가 부족하면 묶음 크기를 절반으로 줄여 같은 요청의 남은 소스에도 적용합니다. TF32는 SAM Audio 추론 중 CUDA FP32 행렬곱에 허용합니다.
+- 원격 분리에서는 앱과 GPU 도구 서버 모두에 배치 크기를 설정합니다. 도구 서버를 먼저 갱신하고 앱을 올립니다. 기존 Router가 플래너 설정을 상속하고 있었다면 기존 Router 값은 `AUDYSSEY_ROUTER_*`로 명시합니다.
+
 ## 작업 규칙
 
 - 담당 모듈 폴더만 수정합니다. `src/audyssey/tools/<모듈>/real.py`를 같은 함수 시그니처로 구현하면 나머지 코드는 그대로 동작합니다.

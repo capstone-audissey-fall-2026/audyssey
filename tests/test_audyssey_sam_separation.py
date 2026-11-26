@@ -133,3 +133,64 @@ class SamSeparationTests(unittest.TestCase):
         self.assertNotIn('masked_videos', self.processor.call_args.kwargs)
         self.separate(video=Path('unused.mp4'))
         self.assertEqual(self.processor.call_args.kwargs['masked_videos'], ['unused.mp4'])
+
+    def test_source_batch_uses_entire_audio_and_preserves_anchors(self):
+        self.plan.spans = [Span(start=0.0001, end=0.0005)]
+        other = SourcePlan(name="wind", kind="ambience", description="rushing wind")
+        outs = [self.root / "voice.wav", self.root / "wind.wav"]
+        self.model.separate.return_value = SimpleNamespace(
+            target=[Tensor(np.ones(100)), Tensor(np.full(100, 2))]
+        )
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_BATCH_SIZE="32"):
+            self.assertEqual(real.separate_batch(self.mono, [self.plan, other], outs, 1), outs)
+        args = self.processor.call_args.kwargs
+        self.assertEqual(args["descriptions"], ["a voice", "rushing wind"])
+        self.assertEqual(args["anchors"], [[["+", 0.0001, 0.0005]], []])
+        for audio in args["audios"]:
+            np.testing.assert_array_equal(audio.data, np.ones((1, 100)))
+        np.testing.assert_array_equal(read_wav(outs[0]), 1)
+        np.testing.assert_array_equal(read_wav(outs[1]), 2)
+
+    def test_explicit_anchors_do_not_disable_span_prediction_for_other_sources(self):
+        self.plan.spans = [Span(start=0.0001, end=0.0005)]
+        other = SourcePlan(name="wind", kind="ambience", description="rushing wind")
+        self.model.separate.return_value = SimpleNamespace(target=[Tensor(np.ones(100))])
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_BATCH_SIZE="4",
+                        AUDYSSEY_SAM_AUDIO_PREDICT_SPANS="true"):
+            real.separate_batch(
+                self.mono, [self.plan, other], [self.root / "a.wav", self.root / "b.wav"], 1
+            )
+        self.assertEqual([c.kwargs["anchors"] for c in self.processor.call_args_list],
+                         [[[["+", 0.0001, 0.0005]]], None])
+        self.assertTrue(all(c.kwargs["predict_spans"] for c in self.model.separate.call_args_list))
+
+    def test_cuda_oom_keeps_lower_batch_size_and_restores_float32_precision(self):
+        from unittest.mock import Mock
+
+        class OutOfMemoryError(RuntimeError):
+            pass
+
+        self.torch.cuda = SimpleNamespace(OutOfMemoryError=OutOfMemoryError, empty_cache=Mock())
+        self.torch.get_float32_matmul_precision = Mock(return_value="highest")
+        self.torch.set_float32_matmul_precision = Mock()
+        calls = []
+        plans = [self.plan.model_copy(update={"description": str(i)}) for i in range(32)]
+        outs = [self.root / f"{i}.wav" for i in range(len(plans))]
+
+        def infer(*args, **kwargs):
+            descriptions = self.processor.call_args.kwargs["descriptions"]
+            calls.append(len(descriptions))
+            if len(descriptions) > 8:
+                raise OutOfMemoryError()
+            return SimpleNamespace(target=[Tensor(np.full(100, int(s))) for s in descriptions])
+
+        self.model.separate.side_effect = infer
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_BATCH_SIZE="32",
+                        AUDYSSEY_SAM_AUDIO_DEVICE="cuda", AUDYSSEY_SAM_AUDIO_ALLOW_TF32="true"):
+            real.separate_batch(self.mono, plans, outs, 1)
+        self.assertEqual(calls, [32, 16, 8, 8, 8, 8])
+        self.assertEqual(self.torch.cuda.empty_cache.call_count, 2)
+        precision_calls = self.torch.set_float32_matmul_precision.call_args_list
+        self.assertEqual([c.args[0] for c in precision_calls], ["high", "highest"] * 6)
+        for i, out in enumerate(outs):
+            np.testing.assert_array_equal(read_wav(out), i)

@@ -27,6 +27,9 @@ class Tools:
     mask_video: Callable[[Path, VisualHint, Path], Path]
     generate: Callable[[Path, SourcePlan, Path, int], Path]
     score_generation: Callable[[Path, SourcePlan, list[SourcePlan]], FilterResult]
+    separate_batch: (
+        Callable[[Path, list[SourcePlan], list[Path], int], list[Path]] | None
+    ) = None
 
 
 def judge_verdict(result: FilterResult, threshold: float) -> FilterResult:
@@ -87,6 +90,10 @@ def load_tools(settings: Settings) -> Tools:
         result = generation.score_generation(track, plan, siblings)
         return generation_verdict(result, settings.generation_margin_threshold)
 
+    separate_batch: (
+        Callable[[Path, list[SourcePlan], list[Path], int], list[Path]] | None
+    )
+    separate_batch = getattr(separation, "separate_batch", None)
     return Tools(
         wraps(planning.plan)(traceable(run_type="tool", name="plan")(planning.plan)),
         wraps(planning.validate_plan)(
@@ -108,4 +115,9 @@ def load_tools(settings: Settings) -> Tools:
         wraps(score_generation)(
             traceable(run_type="tool", name="score_generation")(score_generation)
         ),
+        wraps(separate_batch)(
+            traceable(run_type="tool", name="separate_batch")(separate_batch)
+        )
+        if separate_batch is not None
+        else None,
     )

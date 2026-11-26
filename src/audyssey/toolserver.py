@@ -1,16 +1,18 @@
 from importlib import import_module
+from io import BytesIO
 from pathlib import Path
 from secrets import compare_digest
 from tempfile import TemporaryDirectory
 from threading import Lock
 from typing import Annotated, Literal
+from zipfile import ZipFile
 
 from fastapi import FastAPI, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, Response
-from pydantic import TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 
 from audyssey.contracts import FilterResult, GroundResult, SourcePlan, VisualHint
-from audyssey.settings import Settings
+from audyssey.settings import SAM_AUDIO_MAX_BATCH_SIZE, Settings
 from audyssey.uploads import save_upload
 
 # ponytail: one GPU model, one request at a time; add a queue or batching if throughput matters
@@ -67,6 +69,37 @@ def create_tool_app(
                         mono_path, source_plan, video_path, root / "track.wav", attempt
                     )
                 return Response(out.read_bytes(), media_type="audio/wav")
+
+        if impl == "real":
+
+            @app.post("/separate_batch")
+            def separate_batch(
+                mono: UploadFile,
+                plans: Annotated[str, Form()],
+                attempt: Annotated[int, Form(ge=1)],
+            ) -> Response:
+                try:
+                    source_plans = TypeAdapter(
+                        Annotated[
+                            list[SourcePlan],
+                            Field(min_length=1, max_length=SAM_AUDIO_MAX_BATCH_SIZE),
+                        ]
+                    ).validate_json(plans)
+                except ValidationError:
+                    raise HTTPException(422, "invalid source plans") from None
+                buffer = BytesIO()
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp)
+                    mono_path = save_upload(mono, root / "mono.wav", limit)
+                    outs = [root / f"{index}.wav" for index in range(len(source_plans))]
+                    with _model_lock:
+                        tracks = separation.separate_batch(
+                            mono_path, source_plans, outs, attempt
+                        )
+                    with ZipFile(buffer, "w") as archive:
+                        for track in tracks:
+                            archive.write(track, track.name)
+                return Response(buffer.getvalue(), media_type="application/zip")
 
     if "filtering" in tools:
         filtering = import_module(f"audyssey.tools.filtering.{impl}")
