@@ -16,7 +16,7 @@ async function detailOf(response: Response): Promise<string> {
   } catch {
     // Not JSON: use the text as is.
   }
-  return text || response.statusText;
+  return text || response.statusText || `HTTP ${response.status}`;
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
