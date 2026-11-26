@@ -133,3 +133,61 @@ class SamSeparationTests(unittest.TestCase):
         self.assertNotIn('masked_videos', self.processor.call_args.kwargs)
         self.separate(video=Path('unused.mp4'))
         self.assertEqual(self.processor.call_args.kwargs['masked_videos'], ['unused.mp4'])
+
+    def test_crop_batch_aligns_distinct_windows_and_unspanned_source(self):
+        self.mono = write_wav(self.mono, np.ones((5 * 48000, 1)))
+        self.plan.spans = [
+            Span(start=4.8, end=5), Span(start=1.5, end=1.8), Span(start=0.2, end=0.5)
+        ]
+        other = SourcePlan(name="wind", kind="ambience", description="rushing wind")
+        outs = [self.root / "voice.wav", self.root / "wind.wav"]
+
+        def separate_impl(*args, **kwargs):
+            inputs = self.processor.call_args.kwargs["audios"]
+            # The model may return additional codec padding.
+            return SimpleNamespace(target=[
+                Tensor(np.full(item.data.size + 10, index + 1))
+                for index, item in enumerate(inputs)
+            ])
+
+        self.model.separate.side_effect = separate_impl
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_CROP_PADDING_S="0.7",
+                        AUDYSSEY_SAM_AUDIO_BATCH_SIZE="4",
+                        AUDYSSEY_SAM_AUDIO_PREDICT_SPANS="true"):
+            self.assertEqual(real.separate_batch(self.mono, [self.plan, other], outs, 1), outs)
+        self.model.separate.assert_called_once_with(
+            self.batch, reranking_candidates=1, predict_spans=False
+        )
+        self.assertEqual(self.processor.call_args.kwargs["descriptions"],
+                         ["a voice", "a voice", "rushing wind"])
+        self.assertIsNone(self.processor.call_args.kwargs["anchors"])
+        voice, wind = (read_wav(path).ravel() for path in outs)
+        np.testing.assert_array_equal(voice[:120000], 1)
+        np.testing.assert_array_equal(voice[120000:196800], 0)
+        np.testing.assert_array_equal(voice[196800:], 2)
+        np.testing.assert_array_equal(wind, np.full(240000, 3))
+
+    def test_cuda_oom_splits_batch_and_restores_tf32_setting(self):
+        from unittest.mock import Mock
+
+        class OutOfMemoryError(RuntimeError):
+            pass
+
+        self.torch.cuda = SimpleNamespace(OutOfMemoryError=OutOfMemoryError, empty_cache=Mock())
+        self.torch.get_float32_matmul_precision = Mock(return_value="highest")
+        self.torch.set_float32_matmul_precision = Mock()
+        self.model.separate.side_effect = [
+            OutOfMemoryError(),
+            SimpleNamespace(target=[Tensor(np.ones(100))]),
+            SimpleNamespace(target=[Tensor(np.full(100, 2))]),
+        ]
+        outs = [self.root / "a.wav", self.root / "b.wav"]
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_CROP_PADDING_S="0.7",
+                        AUDYSSEY_SAM_AUDIO_BATCH_SIZE="4", AUDYSSEY_SAM_AUDIO_DEVICE="cuda",
+                        AUDYSSEY_SAM_AUDIO_ALLOW_TF32="true"):
+            real.separate_batch(self.mono, [self.plan, self.plan], outs, 2)
+        self.torch.cuda.empty_cache.assert_called_once()
+        calls = self.torch.set_float32_matmul_precision.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["high", "highest"] * 3)
+        np.testing.assert_array_equal(read_wav(outs[0]), 1)
+        np.testing.assert_array_equal(read_wav(outs[1]), 2)

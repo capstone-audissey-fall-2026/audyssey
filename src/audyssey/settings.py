@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     planner_max_frames: int = Field(default=32, ge=1, le=256)
     # Video input only: keep the clip's audio (Gemini, or vLLM Omni use_audio_in_video).
     planner_video_audio: bool = False
+    planner_strict_audio: bool = False
     # Validator model; each unset value falls back to the planner's.
     validator_api: Api | None = None
     validator_base_url: str | None = None
@@ -113,6 +114,9 @@ class Settings(BaseSettings):
     sam_audio_device: str = "cuda"
     sam_audio_reranking_candidates: int = Field(default=1, ge=1)
     sam_audio_predict_spans: bool = False
+    sam_audio_crop_padding_s: float | None = Field(default=None, ge=0, le=5)
+    sam_audio_batch_size: int = Field(default=1, ge=1, le=8)
+    sam_audio_allow_tf32: bool = False
     # Reranking (candidates > 1) only: CLAP and ImageBind checkpoint files. Empty CLAP
     # uses the cached lukewys/laion_clap 630k-best.pt; empty ImageBind disables the
     # visual ranker, so masked videos fall back to the text rankers (CLAP + Judge).

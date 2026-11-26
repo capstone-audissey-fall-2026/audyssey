@@ -93,6 +93,25 @@ class SettingsTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 Settings()
 
+    def test_strict_av_crop_is_opt_in(self):
+        with patch.dict(os.environ, {}, clear=True):
+            legacy = Settings()
+            self.assertIsNone(legacy.sam_audio_crop_padding_s)
+            self.assertEqual(legacy.sam_audio_batch_size, 1)
+            self.assertFalse(legacy.sam_audio_allow_tf32)
+            self.assertFalse(legacy.planner_strict_audio)
+            with patch.dict(
+                os.environ, AUDYSSEY_PLANNER_STRICT_AUDIO="true",
+                AUDYSSEY_SAM_AUDIO_CROP_PADDING_S="0.7",
+                AUDYSSEY_SAM_AUDIO_BATCH_SIZE="4",
+                AUDYSSEY_SAM_AUDIO_ALLOW_TF32="true",
+            ):
+                enabled = Settings()
+            self.assertEqual(enabled.sam_audio_crop_padding_s, 0.7)
+            self.assertEqual(enabled.sam_audio_batch_size, 4)
+            self.assertTrue(enabled.sam_audio_allow_tf32)
+            self.assertTrue(enabled.planner_strict_audio)
+
     def test_sam_audio_settings_from_env(self):
         with patch.dict(os.environ, {
             "AUDYSSEY_SAM_AUDIO_DEVICE": "cpu",

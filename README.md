@@ -97,6 +97,43 @@ flowchart LR
 
 문제가 생기면 [자주 막히는 곳](docs/running.md#자주-막히는-곳)을, 설정 값은 [설정 표](docs/running.md#설정-환경변수)를 참고합니다.
 
+### Hydrogen AV 플래너와 SAM Audio 배치 분리
+
+`main` 기준 변경 위치는 다음과 같습니다.
+
+| 코드 | 변경 사항 |
+|---|---|
+| [플래너](src/audyssey/tools/planning/prompts.py) | 유음 영상 분리용 프롬프트에 실제로 들리는 소리, 고유명사 제외, 음향 특성에 따른 소스 분리·병합, 0.1초 단위 onset/offset 지침을 추가했습니다. |
+| [분리 그래프](src/audyssey/graph.py) · [도구 서버](src/audyssey/toolserver.py) | 검수 통과 소스의 첫 분리 요청을 묶습니다. Judge와 재시도는 소스별로 실행합니다. 배치 요청이 실패하면 개별 분리로 재시도합니다. |
+| [SAM Audio](src/audyssey/tools/separation/real.py) | 각 스팬을 양쪽 0.7초 확장하고 오디오 경계에서 자른 뒤, 겹치거나 맞닿는 구간을 합칩니다. 구간을 최대 4개씩 묶어 `description`만 넣고, 출력을 원래 시간축과 길이로 복원합니다. 스팬이 없으면 전체 음원을 사용합니다. 시각 마스크가 있는 소스는 기존 경로를 사용합니다. GPU 메모리 부족 시 배치를 나눠 재시도하며, 설정을 켜면 CUDA FP32 행렬곱에 TF32를 허용합니다. |
+
+검수기는 `main`의 입력·프롬프트·재계획 규칙을 따릅니다. 검수 모델 설정이 비어 있으면 Hydrogen을 상속하고, 분리 검수에는 기본적으로 오디오만 전달합니다.
+
+아래 설정을 기존 `.env`에 추가하세요. OpenRouter 키는 배포 환경의 `AUDYSSEY_PLANNER_API_KEY`로 공급합니다. 기존 Router가 플래너 설정을 상속하고 있었다면 `AUDYSSEY_ROUTER_API`, `AUDYSSEY_ROUTER_BASE_URL`, `AUDYSSEY_ROUTER_MODEL`, `AUDYSSEY_ROUTER_API_KEY`에 기존 값을 명시하세요.
+
+```dotenv
+AUDYSSEY_PLANNER_API=openrouter
+AUDYSSEY_PLANNER_BASE_URL=https://openrouter.ai/api/v1
+AUDYSSEY_PLANNER_MODEL=google/gemini-4-hydrogen
+AUDYSSEY_PLANNER_INPUT=video
+AUDYSSEY_PLANNER_VIDEO_AUDIO=true
+AUDYSSEY_PLANNER_STRICT_AUDIO=true
+AUDYSSEY_SAM_AUDIO_CROP_PADDING_S=0.7
+AUDYSSEY_SAM_AUDIO_BATCH_SIZE=4
+AUDYSSEY_SAM_AUDIO_ALLOW_TF32=true
+```
+
+같은 Compose 환경에서 GPU 서비스를 먼저 갱신하고 앱을 시작합니다. 외부 GPU 서버를 쓰면 그 서버의 분리 서비스에도 세 가지 `AUDYSSEY_SAM_AUDIO_*` 설정을 적용합니다. 이전 버전의 GPU 도구 서버로 개별 요청이 넘어가면 그 서버의 기존 분리 방식으로 실행되므로, crop 확인은 갱신된 서버에서 진행합니다.
+
+```bash
+docker compose up -d --build separation judge
+docker compose up -d --build main
+```
+
+`http://127.0.0.1:8600`에서 `samples/jjangu.mp4`를 업로드하고 **분리 시작**을 누릅니다. 로컬에 해당 파일이 없으면 저장소의 `samples/sample.mp4`를 사용합니다. 작업 상세에서 검수·분리 상태와 소스별 Judge 점수를 보고, 타임라인에서 음원 길이와 재생을 확인합니다.
+
+로컬 스모크에서는 `jjangu.mp4`를 실제 원격 분리 HTTP 경로로 처리했습니다. 모델 대역으로 첫 배치 3개, 소스별 재시도 1개와 시간축에 맞는 stem 3개를 확인했습니다. 실제 OpenRouter와 CUDA 모델을 사용하는 전체 실행 및 SAJ 점수는 확인이 필요합니다.
+
 ## 작업 규칙
 
 - 담당 모듈 폴더만 수정합니다. `src/audyssey/tools/<모듈>/real.py`를 같은 함수 시그니처로 구현하면 나머지 코드는 그대로 동작합니다.

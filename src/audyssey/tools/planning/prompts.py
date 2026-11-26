@@ -19,7 +19,23 @@ missing. An empty sources list is valid.
 """
 
 
-def planner_prompt(purpose: Purpose, hears: bool, schema: str) -> str:
+_STRICT_AUDIO = """Purpose: separate the original soundtrack. List only sound sources
+you can actually hear. A visible silent object or action is not a source. Use
+visuals only to locate audible sounds and their timing. Include offscreen sounds.
+Never use character or actor names, franchise titles, or other proper nouns in
+source names or descriptions. Describe the sound with concrete acoustic properties.
+Separate speakers or entities with distinguishable timbre, pitch, or delivery.
+Merge acoustically indistinguishable sounds into one collective source (for
+example, two fighters grunting together or overlapping footsteps).
+Keep physical effects such as impacts separate from human vocalizations.
+Use one span per audible event. Bound its onset and offset as tightly as possible
+to 0.1-second precision. Do not bridge events across an intervening speaker.
+"""
+
+
+def planner_prompt(
+    purpose: Purpose, hears: bool, schema: str, *, strict_audio: bool = False
+) -> str:
     if purpose == "separate":
         policy = """Purpose: separate the original soundtrack. Include only actually audible
 sources when audio is available. A visible object or action alone is not evidence
@@ -41,6 +57,8 @@ dialogue or unrelated effects. Prefer a small set of distinct useful sources.
         "never claim to hear anything. For separation these are unverified visual "
         "candidates, not confirmed sounds.\n"
     )
+    if purpose == "separate" and hears and strict_audio:
+        policy = _STRICT_AUDIO
     return _COMMON + policy + evidence + "Source schema: " + schema
 
 

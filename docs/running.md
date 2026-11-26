@@ -416,6 +416,7 @@ API의 `analyze()`와 Studio는 같은 `build_graph()`로 생성한 그래프를
 | `AUDYSSEY_PLANNER_FPS` | `1` | `frames`면 프레임을 뽑는 fps, `video`면 모델이 샘플링하는 fps (0 초과~30) |
 | `AUDYSSEY_PLANNER_MAX_FRAMES` | `32` | `frames` 입력에서 한 요청에 보내는 최대 프레임 수 (1~256, 검증기도 같은 값) |
 | `AUDYSSEY_PLANNER_VIDEO_AUDIO` | `false` | `video` 입력에 오디오 트랙 포함 (Gemini, OpenRouter의 Gemini, vLLM Qwen-Omni) |
+| `AUDYSSEY_PLANNER_STRICT_AUDIO` | `false` | 유음 영상의 분리 플래너에 고유명사 제외 및 음향 중심의 구간 지침 적용 |
 | `AUDYSSEY_VALIDATOR_API` / `_BASE_URL` / `_MODEL` / `_API_KEY` / `_INPUT` / `_FPS` / `_VIDEO_AUDIO` | 플래너 값 | 검증기 모델과 입력. 뜻은 같은 이름의 `AUDYSSEY_PLANNER_*`와 같고, 비우면 플래너 값을 씀 |
 | `AUDYSSEY_VALIDATOR_CONTEXT_S` | `0.5` | 검수 대상 앞뒤 문맥 길이(초, 0~5). 영상 경계로 제한하고 겹치는 클립은 병합. 실제 판정 대상 구간은 별도로 전달 |
 | `AUDYSSEY_VALIDATOR_AUDIO_ONLY` | `true` | 분리 검수에서 영상 대신 원본 오디오의 PCM WAV 문맥 구간을 전달. 영상에 의한 소리 추측을 줄임. `false`는 영상+오디오 검수 비교용. 생성 검수는 계속 영상/프레임 사용 |
@@ -456,6 +457,9 @@ real 분리 검수는 오디오 근거를 요구합니다. 검수기에 오디�
 | `AUDYSSEY_SAM_AUDIO_CLAP_CHECKPOINT` | 빈 값 | 후보 고르기용 CLAP 파일. 비우면 캐시의 `lukewys/laion_clap` 630k-best |
 | `AUDYSSEY_SAM_AUDIO_IMAGEBIND_CHECKPOINT` | 빈 값 | 시각 힌트 소스의 후보 고르기용 ImageBind 파일. 비우면 쓰지 않음. Compose에서는 파일을 separation 컨테이너에 따로 마운트해야 함 |
 | `AUDYSSEY_SAM_AUDIO_PREDICT_SPANS` | `false` | 구간이 없을 때 모델이 구간을 예측 (span predictor를 GPU에 추가로 올림) |
+| `AUDYSSEY_SAM_AUDIO_CROP_PADDING_S` | 빈 값 | 초 단위 crop 여백 (0–5). 설정하면 시각 마스크가 없는 소스의 분리에 적용 |
+| `AUDYSSEY_SAM_AUDIO_BATCH_SIZE` | `1` | crop 분리의 GPU 호출당 최대 구간 수 (1–8). 원격 분리의 경우 앱과 분리 도구 서버에 설정 |
+| `AUDYSSEY_SAM_AUDIO_ALLOW_TF32` | `false` | SAM Audio가 CUDA에서 FP32 행렬곱을 실행할 때 TF32 허용 |
 | `AUDYSSEY_SAM3_MODEL` / `AUDYSSEY_SAM3_DEVICE` | `facebook/sam3.1` / `cuda` | 그라운딩 모델과 장치 (CUDA 전용) |
 | `AUDYSSEY_SAM3_TRACK_FPS` | `2` | 마스크 추적 fps. `0`이면 원본 fps (24GB GPU에서는 메모리 부족 위험) |
 

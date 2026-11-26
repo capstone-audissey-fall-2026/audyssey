@@ -389,7 +389,8 @@ def _source(item: object, duration: float) -> SourcePlan:
 def plan(
     video: Path, audio: Path, duration: float, feedback: list[PlanIssue]
 ) -> list[SourcePlan]:
-    endpoint = Settings().planner_endpoint()
+    settings = Settings()
+    endpoint = settings.planner_endpoint()
     request = current_request()
     with TemporaryDirectory() as tmp:
         parts = _media(video, endpoint, [(0.0, duration)], Path(tmp))
@@ -399,6 +400,7 @@ def plan(
             request.purpose,
             request.audio_available and _hears(endpoint),
             json.dumps(SourcePlan.model_json_schema()),
+            strict_audio=settings.planner_strict_audio,
         ),
         f"Video duration: {duration:g} seconds. Feedback: "
         + json.dumps([issue.model_dump() for issue in feedback])

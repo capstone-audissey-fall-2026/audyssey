@@ -4,7 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 import numpy as np
 from tests.audyssey_media import make_video
-from audyssey import graph
+from audyssey import graph, trace
 from audyssey.contracts import (
     PlanIssue,
     SourcePlan,
@@ -83,6 +83,31 @@ class GraphTests(unittest.TestCase):
         self.assertEqual([s.attempts for s in job.sources[1:]], [1, 1])
         self.assertTrue((self.directory / job.residual.path).is_file())
 
+    def test_batch_judges_and_retries_only_the_failed_source(self):
+        self.ctx.settings.sam_audio_crop_padding_s = 0.7
+        self.ctx.settings.sam_audio_batch_size = 4
+        separate = self.ctx.tools.separate
+        batches, singles = [], []
+
+        def batch(mono, plans, outs, attempt):
+            batches.append([p.name for p in plans])
+            return [separate(mono, plan, None, out, attempt)
+                    for plan, out in zip(plans, outs, strict=True)]
+
+        def single(mono, plan, video, out, attempt):
+            singles.append((plan.name, attempt))
+            return separate(mono, plan, video, out, attempt)
+
+        self.ctx.tools = replace(self.ctx.tools, separate=single, separate_batch=batch)
+        job = graph.analyze(self.job, self.ctx)
+        self.assertEqual(batches, [[source.plan.name for source in job.sources]])
+        self.assertEqual(singles, [(job.sources[0].plan.name, 2)])
+        batch_calls = [entry for entry in trace.read(self.directory)
+                       if entry["tool"] == "separate_batch"]
+        self.assertEqual([entry["step"] for entry in batch_calls], ["separate"])
+        self.assertEqual([source.attempts for source in job.sources], [2, 1, 1])
+        self.assertTrue(all(source.filter.passed for source in job.sources))
+
     def test_plan_round_limit_warns(self):
         self.ctx.settings.visual_prompt = True
         self.ctx.settings.max_plan_rounds = 1
@@ -134,6 +159,8 @@ class GraphTests(unittest.TestCase):
 
         self.ctx.settings.max_plan_rounds = 1
         separate = Mock(side_effect=AssertionError("unverified sources must not run"))
+        self.ctx.settings.sam_audio_crop_padding_s = 0.7
+        self.ctx.settings.sam_audio_batch_size = 4
         self.ctx.tools = replace(
             self.ctx.tools,
             validate_plan=lambda video, audio, plans: [
@@ -141,6 +168,7 @@ class GraphTests(unittest.TestCase):
                 for p in plans
             ],
             separate=separate,
+            separate_batch=separate,
         )
         job = graph.analyze(self.job, self.ctx)
         self.assertEqual(job.state, "ready", job.error)

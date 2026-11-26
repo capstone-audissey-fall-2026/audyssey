@@ -85,6 +85,31 @@ class PlannerRealTests(unittest.TestCase):
         self.assertIn("accepted_sources", request["messages"][0]["content"])
         self.assertIn("do not return them again", request["messages"][0]["content"].lower())
 
+    def test_strict_audio_rules_apply_only_to_audible_separation(self):
+        from audyssey.tools.planning import planning_scope
+
+        with patch.dict(os.environ, AUDYSSEY_PLANNER_API="openrouter",
+                        AUDYSSEY_PLANNER_MODEL="google/gemini-4-hydrogen",
+                        AUDYSSEY_PLANNER_INPUT="video",
+                        AUDYSSEY_PLANNER_VIDEO_AUDIO="true",
+                        AUDYSSEY_PLANNER_STRICT_AUDIO="true"), patch(
+            "audyssey.media.planner_clip", return_value=self.video
+        ) as clip:
+            with planning_scope("separate", True):
+                self.plan([self.source()])
+            self.assertTrue(clip.call_args.args[2])
+            with planning_scope("generate", True):
+                self.plan([])
+            with planning_scope("separate", False):
+                self.plan([])
+        request = self.requests[0]
+        self.assertEqual(request["model"], "google/gemini-4-hydrogen")
+        self.assertIn("proper nouns", request["messages"][0]["content"])
+        self.assertIn("0.1-second", request["messages"][0]["content"])
+        self.assertTrue(any(part["type"] == "video_url" for part in request["messages"][1]["content"]))
+        for request in self.requests[1:]:
+            self.assertNotIn("proper nouns", request["messages"][0]["content"])
+
     def test_plan_accepts_bare_source_list(self):
         # Gemini sometimes returns the list without the {"sources": ...} wrapper.
         self.responses.append(json.dumps([self.source()]))
