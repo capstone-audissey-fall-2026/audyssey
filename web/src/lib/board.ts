@@ -125,6 +125,14 @@ export interface BoardLabel { text: string; x: number; y: number; loop: boolean;
 export interface BoardLane { id: string; name: string; what: string; up: boolean | null; busy: boolean; y: number; h: number; title: string }
 export interface Board { width: number; height: number; nodeW: number; nodeH: number; laneH: number; lanes: BoardLane[]; nodes: BoardNode[]; edges: BoardEdge[]; labels: BoardLabel[] }
 
+// The live steps as one line (column, then lane), for the collapsed board header; dimmed steps are left out.
+export function stepStrip(board: Board): { step: string; label: string; status: NodeStatus; sub: string }[] {
+  return board.nodes
+    .filter((n) => !n.idle)
+    .sort((a, b) => a.x - b.x || a.y - b.y)
+    .map(({ step, label, status, sub }) => ({ step, label, status, sub }));
+}
+
 export function boardLayout(lanesIn: Lane[], job: Job | null): Board {
   const method = job?.method ?? null;
   // Before a start both paths stay possible; after it, the path not taken dims.

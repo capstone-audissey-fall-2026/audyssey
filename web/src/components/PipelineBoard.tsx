@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent, type MouseEvent } from "react";
-import { DATA_LABEL, STATUS_LABEL, STEP_LABEL, boardLayout, modelText } from "../lib/board";
+import { DATA_LABEL, STATUS_LABEL, STEP_LABEL, boardLayout, modelText, stepStrip } from "../lib/board";
+import Icon from "./Icon";
 import type { Job, Lane } from "../types";
 
 interface PipelineBoardProps {
@@ -37,6 +38,29 @@ export default function PipelineBoard({ job, lanes, step: openStep, edge: openEd
           <span aria-hidden="true">{open ? "▾" : "▸"}</span>
           Pipeline
         </button>
+        {open ? null : (
+          <ol className="step-strip">
+            {stepStrip(board).map((s) => (
+              <li key={s.step}>
+                <button
+                  aria-label={`${s.label}: ${STATUS_LABEL[s.status]}${s.sub ? `, ${s.sub}` : ""}`}
+                  className={`step-chip ${s.status}`}
+                  onClick={() => {
+                    setUserOpen(true);
+                    onStep(s.step);
+                  }}
+                  type="button"
+                >
+                  {s.label}
+                  {s.status === "done" ? <span aria-hidden="true" className="mk">✓</span> : null}
+                  {s.status === "running" ? <Icon name="spin" /> : null}
+                  {s.status === "warning" || s.status === "failed" ? <span aria-hidden="true" className="mk">!</span> : null}
+                  {s.sub ? <span className="sub">{s.sub}</span> : null}
+                </button>
+              </li>
+            ))}
+          </ol>
+        )}
         <span className="board-meta">{known.length ? `Servers ${known.filter((l) => l.up).length}/${known.length} up` : ""}</span>
       </h2>
       {open ? (

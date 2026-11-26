@@ -293,7 +293,16 @@ h1, h2, h3, p { margin: 0; }
 .editor > .board-panel { margin-inline: 12px; }
 .board-head { display: flex; align-items: center; gap: 12px; padding: 4px 8px; font-size: 0.8125rem; }
 .board-toggle { display: inline-flex; gap: 6px; align-items: center; min-height: 28px; padding: 0 6px; background: transparent; border: 0; border-radius: var(--r-ctl); color: var(--text); font-weight: 600; cursor: pointer; }
-.board-meta { color: var(--muted); font-size: 0.75rem; font-weight: 400; }
+.step-strip { display: flex; flex: 1; min-width: 0; margin: 0; padding: 0; list-style: none; overflow-x: auto; white-space: nowrap; }
+.step-strip li { flex: none; }
+.step-strip li + li::before { content: ""; display: inline-block; width: 10px; height: 1px; margin-inline: 2px; vertical-align: middle; background: var(--ctl-border); }
+.step-strip .step-chip { display: inline-flex; gap: 4px; align-items: center; min-height: 24px; padding: 0 6px; background: transparent; border: 0; border-radius: var(--r-ctl); color: var(--muted); font-size: 0.75rem; font-weight: 600; cursor: pointer; }
+.step-strip .step-chip .ic { width: 12px; height: 12px; }
+.step-strip .step-chip .sub { font-weight: 400; font-variant-numeric: tabular-nums; }
+.step-strip .step-chip.running { color: var(--text); } .step-strip .step-chip.running .ic { color: var(--run); }
+.step-strip .step-chip.done .mk { color: var(--ok); } .step-strip .step-chip.warning .mk { color: var(--accent); } .step-strip .step-chip.failed { color: var(--bad); }
+@media (hover: hover) { .step-strip .step-chip:hover { color: var(--text); } }
+.board-meta { flex: none; white-space: nowrap; color: var(--muted); font-size: 0.75rem; font-weight: 400; }
 svg.flow { display: block; width: 100%; height: auto; min-width: 920px; max-height: 38vh; }
 .board-panel { overflow-x: auto; }
 .flow .edge { fill: none; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; opacity: .3; }

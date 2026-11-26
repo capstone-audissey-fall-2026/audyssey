@@ -127,3 +127,34 @@ test("steps sharing a column on one lane stack on a second row; lanes below shif
   assert.equal(below.lanes[1].y, 2 * below.laneH);
   assert.equal(below.height, 3 * below.laneH);
 });
+
+test("stepStrip lists the live steps in column order with the node status and count", async (context) => {
+  const { boardLayout, nodeState, stepStrip } = await (await ssr(context)).ssrLoadModule("/src/lib/board.ts");
+  const sources = [source("s1"), source("s2"), source("s3"), source("s4")];
+  const steps = [step("plan", "done"), ...sources.map((s) => step(`separate:${s.id}`, "done"))];
+  const separated = job({ method: "separate", sources, steps });
+  const strip = stepStrip(boardLayout(lanes, separated));
+  assert.deepEqual(strip.map((s) => s.label), ["Prepare", "Plan", "Check", "Separate", "Judge", "Residual", "Mix"]);
+  assert.deepEqual(strip.map((s) => s.step), ["preprocess", "plan", "validate_plan", "separate", "judge", "residual", "render"]);
+  const sep = strip.find((s) => s.step === "separate");
+  assert.equal(sep.sub, "4/4");
+  assert.equal(sep.status, nodeState(separated, "separate").status);
+
+  const silent = stepStrip(boardLayout(lanes, job({ silent: true, method: "generate", sources: [source("g1", { origin: "generated" })] })));
+  assert.deepEqual(silent.map((s) => s.label), ["Prepare", "Plan", "Check", "Generate", "Score", "Mix"]);
+  // Before a method is chosen only the dimmed-by-nothing steps remain, i.e. all of them.
+  assert.equal(stepStrip(boardLayout(lanes, job({ state: "new", method: null }))).length, 9);
+});
+
+test("the collapsed PipelineBoard shows the step strip; an open one does not", async (context) => {
+  const { default: PipelineBoard } = await (await ssr(context)).ssrLoadModule("/src/components/PipelineBoard.tsx");
+  const props = { lanes, step: null, edge: null, onStep() {}, onEdge() {} };
+  const sources = [source("s1"), source("s2")];
+  const steps = [step("separate:s1", "done"), step("separate:s2", "running")];
+  const ready = renderToStaticMarkup(createElement(PipelineBoard, { ...props, job: job({ state: "ready", sources, steps }) }));
+  assert.match(ready, /<ol class="step-strip">/);
+  assert.match(ready, /<button[^>]*aria-label="Separate: Running, 1\/2"/);
+  assert.match(ready, /Pipeline<\/button><ol class="step-strip">/); // after the toggle
+  const running = renderToStaticMarkup(createElement(PipelineBoard, { ...props, job: job({ state: "running", sources, steps }) }));
+  assert.doesNotMatch(running, /step-strip/);
+});
