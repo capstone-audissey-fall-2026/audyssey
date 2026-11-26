@@ -2,12 +2,11 @@ import json
 from pathlib import Path
 
 from audyssey.contracts import FilterResult, SourcePlan
-from audyssey.settings import Settings
-from audyssey.tools.remote import post
+from audyssey.tools.remote import post, remote_settings
 
 
 def generate(video: Path, plan: SourcePlan, out: Path, seed: int) -> Path:
-    settings = Settings()
+    settings = remote_settings()
     response = post(
         settings.generator_url,
         "/generate",
@@ -26,7 +25,7 @@ def score_generation(
     plan: SourcePlan,
     siblings: list[SourcePlan],
 ) -> FilterResult:
-    settings = Settings()
+    settings = remote_settings()
     response = post(
         settings.generator_url,
         "/score",

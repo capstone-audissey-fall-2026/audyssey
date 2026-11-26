@@ -98,6 +98,9 @@ export interface RouteResult { route_id: string; decision: RouteDecision }
 // One item of GET /api/system: a server and the pipeline steps that run on it.
 export interface Lane { id: string; name: string; models: string[]; steps: string[]; up: boolean | null }
 
+// GET/POST /api/gpu-tools: the tools server the app uses. The token is never returned.
+export interface GpuTools { tools_url: string; token_set: boolean; remote: Record<string, boolean> }
+
 // One line of a job's trace.jsonl (GET /api/jobs/{id}/trace).
 export interface TraceCall {
   id: string;

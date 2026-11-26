@@ -23,6 +23,13 @@ export function failure(what: string, error: unknown, next: string): string {
   return [what, detail && (/[.!?…]$/.test(detail) ? detail : `${detail}.`), next].filter(Boolean).join(" ");
 }
 
+// What to do after a failed GPU tools save: 409 means a job is running, anything else is about the URL.
+export function gpuToolsSaveNext(error: unknown): string {
+  return error instanceof Error && "status" in error && error.status === 409
+    ? "Wait for the running job to finish, then save again."
+    : "Check the URL and try again.";
+}
+
 // Failure text for a track's panel: a short human cause, then the next step.
 // The raw backend message (host, port, errno) never reaches the screen. The tools-server hint
 // is only added for tools-server/HTTP failures; other details (e.g. no original audio) stand alone.

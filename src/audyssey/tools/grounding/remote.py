@@ -1,12 +1,11 @@
 from pathlib import Path
 
 from audyssey.contracts import GroundResult, VisualHint
-from audyssey.settings import Settings
-from audyssey.tools.remote import post
+from audyssey.tools.remote import post, remote_settings
 
 
 def locate(video: Path, hint: VisualHint) -> GroundResult:
-    settings = Settings()
+    settings = remote_settings()
     response = post(
         settings.grounding_url,
         "/locate",
@@ -19,7 +18,7 @@ def locate(video: Path, hint: VisualHint) -> GroundResult:
 
 
 def mask_video(video: Path, hint: VisualHint, out: Path) -> Path:
-    settings = Settings()
+    settings = remote_settings()
     response = post(
         settings.grounding_url,
         "/mask",

@@ -1,14 +1,13 @@
 from pathlib import Path
 
 from audyssey.contracts import SourcePlan
-from audyssey.settings import Settings
-from audyssey.tools.remote import post
+from audyssey.tools.remote import post, remote_settings
 
 
 def separate(
     mono: Path, plan: SourcePlan, video: Path | None, out: Path, attempt: int
 ) -> Path:
-    settings = Settings()
+    settings = remote_settings()
     files = {"mono": ("mono.wav", mono.read_bytes(), "audio/wav")}
     if video is not None:
         files["video"] = ("video.mp4", video.read_bytes(), "video/mp4")

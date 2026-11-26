@@ -1,4 +1,4 @@
-import type { Command, Job, Lane, Method, RouteResult, TraceCall } from "./types";
+import type { Command, GpuTools, Job, Lane, Method, RouteResult, TraceCall } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string) {
@@ -39,6 +39,9 @@ export const startJob = (id: string, method: Method) => post<Job>(`/api/jobs/${i
 export const sendCommand = (id: string, cmd: Command) => post<Job>(`/api/jobs/${id}/commands`, cmd);
 export const getTrace = (id: string) => request<TraceCall[]>(`/api/jobs/${id}/trace`);
 export const getSystem = () => request<Lane[]>("/api/system");
+export const getGpuTools = () => request<GpuTools>("/api/gpu-tools");
+// token null keeps the saved token; an empty tools_url clears the connection.
+export const saveGpuTools = (tools_url: string, token: string | null) => post<GpuTools>("/api/gpu-tools", { tools_url, token });
 export const routeRequest = (id: string, text: string) => post<RouteResult>(`/api/jobs/${id}/route`, { request: text });
 // Which router answers /route; the edit bar is off for "stub".
 export const getRouter = () => request<{ router: string }>("/api/router");
