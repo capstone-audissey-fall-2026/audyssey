@@ -71,14 +71,22 @@ test("edges carry video, audio and text; a retry loop shows only while it runs",
   assert.match(edge.d, /^M /);
 });
 
-test("modelText shortens the model only when a count shares the line; nodes are 108 wide", async (context) => {
+test("modelText caps the model at 13 characters; nodes are 108 wide, 60 tall, lanes 76", async (context) => {
   const { boardLayout, modelText } = await (await ssr(context)).ssrLoadModule("/src/lib/board.ts");
-  const short = modelText("sam-audio-large-tv", "4/4");
-  assert.equal(short.length, 12);
-  assert.ok(short.endsWith("…"));
-  assert.equal(modelText("ffmpeg", "Round 2"), "ffmpeg");
-  assert.equal(modelText("sam-audio-large-tv", ""), "sam-audio-large-tv");
-  assert.equal(boardLayout(lanes, null).nodeW, 108);
+  assert.equal(modelText("sam-audio-large-tv"), "sam-audio-la…");
+  assert.equal(modelText("sam-audio-large-tv").length, 13);
+  assert.equal(modelText("ffmpeg"), "ffmpeg");
+  assert.equal(modelText("Qwen3-VL-8B-Instruct").length, 13);
+  const board = boardLayout(lanes, null);
+  assert.equal(board.nodeW, 108);
+  assert.equal(board.nodeH, 60);
+  assert.equal(board.laneH, 76);
+});
+
+test("the residual step is labelled Residual", async (context) => {
+  const { boardLayout, STEP_LABEL } = await (await ssr(context)).ssrLoadModule("/src/lib/board.ts");
+  assert.equal(STEP_LABEL.residual, "Residual");
+  assert.equal(boardLayout(lanes, null).nodes.find((n) => n.step === "residual").label, "Residual");
 });
 
 test("PipelineBoard draws the steps as buttons and opens while the job runs", async (context) => {
@@ -90,7 +98,8 @@ test("PipelineBoard draws the steps as buttons and opens while the job runs", as
   assert.match(running, /aria-expanded="true"/);
   const round2 = renderToStaticMarkup(createElement(PipelineBoard, { ...props, job: job({ state: "running", steps: [step("plan", "running", { round: 2, max_rounds: 3 })] }) }));
   const plan = (await (await ssr(context)).ssrLoadModule("/src/lib/board.ts")).boardLayout(lanes, null).nodes.find((n) => n.step === "plan");
-  assert.match(round2, new RegExp(`<text class="count" text-anchor="end" x="${plan.x + 108 - 10}" y="${plan.y + 35}">Round 2</text>`));
+  assert.match(round2, new RegExp(`<text class="count" x="${plan.x + 11}" y="${plan.y + 51}">Round 2</text>`));
+  assert.doesNotMatch(round2, /class="count" text-anchor="end"/);
   assert.match(running, /Pipeline/);
   const ready = renderToStaticMarkup(createElement(PipelineBoard, { ...props, job: job({ state: "ready", steps: [step("plan", "done")] }) }));
   assert.match(ready, /aria-expanded="false"/);
