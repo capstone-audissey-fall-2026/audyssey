@@ -48,7 +48,7 @@
 | 1. 브랜치 | 없음 | 최신 `main`에서 브랜치를 만듦 |
 | 2. 커밋 | 없음 (로컬 훅 없음) | 커밋 전에 [로컬 검사](#로컬-검사)를 통과시킴 |
 | 3. push | 없음. push만으로는 CI가 돌지 않음 | `git push -u origin <브랜치>` (팀원은 write 권한으로 레포에 직접 push) |
-| 4. PR (대상 `main`) | `ci-lint`가 job 3개를 실행하며 모두 필수:<br>- `lint-and-format-check`: ruff lint·format, ty, unittest<br>- `numpy-1x`: Python 3.12 + numpy 1.26 unittest<br>- `docker-build`: app 이미지 빌드(push 안 함). tools 이미지는 `docker/tools.Dockerfile`, `gpu/`, 도구 코드, 의존성이 바뀐 PR에서만 빌드 | 설명에 요약과 확인 방법을 적음. 핵심 파일을 바꿨다면 팀 합의를 받음. 실패하면 고쳐서 다시 push |
+| 4. PR (대상 `main`) | `ci-lint`가 job 3개를 실행하며 모두 필수:<br>- `lint-and-format-check`: ruff lint·format, ty, unittest<br>- `numpy-1x`: Python 3.12 + numpy 1.26 unittest<br>- `docker-build`: 배포될 이미지가 실제로 실행되는지 확인(push와 캐시 쓰기 없음). app 이미지는 컨테이너를 띄워 `GET /`이 빌드된 웹 UI(`/assets` 참조)를, `GET /api/jobs`가 JSON을 돌려주는지 검사. tools 이미지는 `docker/tools.Dockerfile`, `gpu/`, `src/`, 의존성이 바뀐 PR에서만 빌드하며, 빌드 안의 smoke 단계(`docker/tools_smoke.py`)가 `import torch, audyssey`와 stub tool-server(`/health`의 도구 4개, 틀린 토큰은 401)를 검사(GPU 없음) | 설명에 요약과 확인 방법을 적음. 핵심 파일을 바꿨다면 팀 합의를 받음. 실패하면 고쳐서 다시 push |
 | 5. merge | `main` 보호 규칙 적용:<br>- 필수 검사 통과와 최신 `main` 반영 전에는 머지 불가 (관리자 포함)<br>- 승인 1명 필요. 핵심 파일은 @gwpark0741 또는 @Zero-woo 승인 필요 (`.github/`는 @gwpark0741만). 새로 push하면 기존 승인은 다시 받아야 함<br>- 강제 push와 브랜치 삭제 금지 | 리뷰를 받고 머지. 관리자 본인 PR은 승인 없이 머지할 수 있지만 검사는 똑같이 통과해야 함. 머지 커밋 방식을 쓰고, 머지한 브랜치는 직접 지움 |
 | 6. 배포 | `main`에 이미지에 들어가는 파일(`src/`, 의존성, `gpu/`, `docker/`)이 반영되면 `publish-images`가 `audyssey-app`, `audyssey-tools`를 빌드해 GHCR에 `latest`와 커밋 SHA 태그로 올림 (수동 실행 가능, PR에서는 올리지 않음) | 아래 [서버 갱신](#서버-갱신)대로 SHA 태그로 고정해 올림. RunPod은 Pod를 다시 만들 때 SHA 태그를 지정 |
 
