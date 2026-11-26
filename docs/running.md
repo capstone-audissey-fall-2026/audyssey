@@ -158,7 +158,7 @@ docker compose -f compose.tools.yaml down   # 끝나면
 ```
 
 - 토큰(`AUDYSSEY_TOOL_TOKEN`)이 없으면 시작하지 않습니다.
-- 토큰은 평문 HTTP로 오가므로 노트북에서 `ssh -L 8700:localhost:8700 <서버>`를 열고 주소로 `http://localhost:8700`을 쓰는 방식을 권합니다. 터널은 loopback만 있으면 됩니다.
+- 토큰은 평문 HTTP로 오가므로 노트북에서 `ssh -L 8700:localhost:8700 <서버>` 터널을 여는 방식을 권합니다. 터널은 노트북의 127.0.0.1에서만 받으므로, main을 `uv run`으로 띄울 때만 주소 `http://localhost:8700`이 통합니다(3-2). Docker main의 `localhost`는 컨테이너 자신이라 연결되지 않습니다.
 - `AUDYSSEY_TOOLS_BIND=0.0.0.0`으로 직접 공개할 수도 있지만, Docker가 공개한 포트는 `ufw` 같은 호스트 방화벽의 INPUT 규칙을 거치지 않아 막을 수 없습니다. 신뢰하는 사설 네트워크에서만 쓰고, 그 밖에서는 TLS 프록시를 앞에 둡니다.
 - 2번의 전체 구성과 함께 올리면 같은 모델이 GPU에 두 번 올라가므로 하나만 띄웁니다.
 
@@ -174,7 +174,19 @@ docker compose -f compose.tools.yaml down   # 끝나면
    ```bash
    docker compose up -d main    # http://localhost:8600
    ```
-   Docker 없이 쓰려면 1번처럼 화면을 빌드한 뒤 `uv run --env-file .env audyssey serve`를 씁니다(`uv run`은 `.env`를 자동으로 읽지 않음).
+   Docker 없이 쓰려면 1번처럼 화면을 빌드한 뒤 아래처럼 띄웁니다(`uv run`은 `.env`를 자동으로 읽지 않으므로 `--env-file`이 필요하고, 플래너에는 `llm`이 필요함). SSH 터널로 연결할 때는 이 방법을 씁니다.
+   ```bash
+   uv run --extra ui --extra llm --env-file .env audyssey serve    # http://localhost:8600
+   ```
+   이 방법에서는 `.env`에 아래 모드도 있어야 합니다. 값이 없으면 stub이 기본이라 오류 없이 가짜 결과가 나옵니다. 화면의 **GPU tools**로 연결하면 모드는 자동으로 remote가 됩니다.
+   ```dotenv
+   AUDYSSEY_PLANNER=real
+   AUDYSSEY_PLANNER_API_KEY=<GOOGLE_API_KEY와 같은 값>    # Compose만 GOOGLE_API_KEY를 변환해 줌
+   AUDYSSEY_SEPARATOR=remote
+   AUDYSSEY_FILTER=remote
+   AUDYSSEY_GROUNDER=remote
+   AUDYSSEY_GENERATOR=remote
+   ```
 3. 도구 서버에 연결합니다. 방법은 둘 중 하나입니다.
 
 | 방법 | 어떻게 | 적용 |
@@ -183,7 +195,7 @@ docker compose -f compose.tools.yaml down   # 끝나면
 | `.env` | 아래 값을 넣고 `docker compose up -d main`을 다시 실행 | 재시작 후 |
 
 ```dotenv
-# 주소 4개는 같은 값이고 토큰은 도구 서버와 같은 값
+# 주소 4개는 같은 값이고 토큰은 도구 서버와 같은 값 (SSH 터널 + uv run main이면 http://localhost:8700)
 AUDYSSEY_TOOL_TOKEN=<도구 서버와 같은 토큰>
 AUDYSSEY_SEPARATOR_URL=https://<POD-ID>-8700.proxy.runpod.net
 AUDYSSEY_FILTER_URL=https://<POD-ID>-8700.proxy.runpod.net
