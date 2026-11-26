@@ -36,6 +36,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Layer cache in the registry (like v2a_inspect): a run rebuilds only the layers
+      # whose inputs changed. The buildcache tag is a cache manifest, not a runnable image.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -44,3 +46,7 @@ jobs:
           tags: |
             ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:latest
             ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:buildcache,mode=max,compression=zstd,compression-level=3,force-compression=true
+          outputs: |
+            type=image,oci-mediatypes=true,compression=zstd,compression-level=3,force-compression=true
