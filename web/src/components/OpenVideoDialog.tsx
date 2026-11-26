@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useId, useRef } from "react";
 import { projectRow } from "../lib/projects";
 import type { Job } from "../types";
+import GpuToolsForm from "./GpuToolsForm";
 import Icon from "./Icon";
 
 interface OpenVideoDialogProps {
@@ -73,6 +74,7 @@ export default function OpenVideoDialog({ open, onClose, onUpload, uploading, up
             </button>
           </div>
         </form>
+        <GpuToolsForm open={open} />
         <section className="dlg-sec" aria-labelledby={`${uid}-recent`}>
           <h3 id={`${uid}-recent`}>Recent projects</h3>
           {projects.length === 0 ? (
