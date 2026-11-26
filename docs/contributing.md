@@ -58,6 +58,7 @@
 
 - Dockerfile은 바뀌는 빈도가 낮은 것부터 레이어를 쌓습니다. 의존성(`pyproject.toml`, `uv.lock`, `gpu/`)을 먼저 설치하고 그다음 `src/`, 웹 빌드 결과를 복사하므로, 코드만 바꾸면 의존성 레이어(tools는 torch 포함 약 20GB)를 다시 만들지 않습니다. 웹(`web/`)만 바꾸면 app 이미지의 Node 단계와 마지막 복사 레이어만 다시 만듭니다.
 - `publish-images`는 이미지마다 레지스트리 캐시를 씁니다. 캐시는 `ghcr.io/capstone-audissey-fall-2026/audyssey-app:buildcache`, `audyssey-tools:buildcache` 태그에 저장되고(실행 가능한 이미지가 아님), 바뀐 레이어만 새로 빌드합니다. 캐시 레이어만 zstd로 압축하며(buildx가 읽는 용도), 배포되는 `latest`와 SHA 이미지는 gzip 레이어를 유지합니다. `ci-lint`의 `docker-build`는 같은 캐시를 읽기만 합니다.
+- 레이어 순서나 Dockerfile이 바뀐 변경을 머지한 뒤 첫 실행(PR의 `docker-build`와 머지 후 첫 `publish-images`)은 캐시가 없어 기존처럼 전체 빌드(약 10~12분)를 합니다. 이 실행이 캐시를 새로 채우며, 초 단위 publish는 두 번째 실행부터, `src/`만 바뀐 경우에만 적용됩니다.
 - 서버에서 직접 빌드할 때는 `uv` 다운로드 캐시가 BuildKit 캐시 마운트에 남아 재시도와 재빌드가 빨라집니다.
 
 ## 서버 갱신
