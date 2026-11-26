@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import Callable
 import zipfile
 from uuid import uuid4
@@ -237,7 +238,12 @@ def create_app(
         # ponytail: a job that starts right after this check is not covered.
         if any(lock.locked() for lock in locks.values()):
             raise HTTPException(409, "a job is running")
-        token = override()[1] if data.token is None else data.token
+        token = override()[1]
+        if data.token is not None:
+            token = data.token.strip()
+            # a header value: printable ASCII, no spaces
+            if not re.fullmatch(r"[!-~]*", token):
+                raise HTTPException(422, "token must be printable ASCII without spaces")
         set_override(url, token if url else "")
         ctx.settings = with_override(settings)
         ctx.tools = load_tools(ctx.settings) if url else base_tools

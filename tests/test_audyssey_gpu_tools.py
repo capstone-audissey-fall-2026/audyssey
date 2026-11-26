@@ -81,6 +81,14 @@ class GpuToolsTests(unittest.TestCase):
         self.save("http://other:8700", None)
         self.assertEqual(self.separate_call(), ("http://other:8700/separate", {"Authorization": "Bearer tok"}))
 
+    def test_token_is_stripped_and_unusable_tokens_are_rejected(self):
+        self.assertEqual(self.save("http://gpu:8700", "tok \t").status_code, 200)
+        self.assertEqual(self.separate_call()[1], {"Authorization": "Bearer tok"})
+        for token in ["to k", "tok\u00e9", "tok\x00"]:
+            with self.subTest(token=token):
+                self.assertEqual(self.save("http://other:8700", token).status_code, 422)
+                self.assertEqual(self.client.get("/api/gpu-tools").json()["tools_url"], "http://gpu:8700")
+
     def test_empty_token_drops_the_saved_token(self):
         self.save("http://gpu:8700", "tok")
         response = self.save("http://gpu:8700", "")
