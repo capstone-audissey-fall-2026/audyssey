@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM node:22-bookworm-slim AS frontend
 WORKDIR /app/web
 COPY web/package.json web/package-lock.json ./
@@ -15,10 +17,24 @@ RUN for i in 1 2 3; do \
       echo "apt attempt $i failed, retrying"; sleep 15; \
     done; exit 1
 WORKDIR /app
-COPY pyproject.toml uv.lock README.md ./
+# Dependencies first (only pyproject.toml and uv.lock), then src/ and the built web UI,
+# so a code or UI change does not reinstall the venv.
+ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_HTTP_TIMEOUT=600
+COPY pyproject.toml uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    for i in 1 2 3; do \
+      uv sync --locked --no-dev --no-install-project --extra ui --extra llm && exit 0; \
+      echo "uv sync attempt $i failed, retrying"; sleep 10; \
+    done; exit 1
+COPY README.md ./
 COPY src/ src/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    for i in 1 2 3; do \
+      uv sync --locked --no-dev --extra ui --extra llm && exit 0; \
+      echo "uv sync attempt $i failed, retrying"; sleep 10; \
+    done; exit 1
+# After the sync: the editable install reads src/, and a web change then only adds this layer.
 COPY --from=frontend /app/src/audyssey/webui src/audyssey/webui
-RUN uv sync --locked --no-dev --extra ui --extra llm
 ENV PATH="/app/.venv/bin:$PATH"
 # Run as an unprivileged user; jobs are written under /app/work (named volume).
 RUN useradd --create-home --uid 10001 app && mkdir -p /app/work/jobs && chown -R app:app /app/work

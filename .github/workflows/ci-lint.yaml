@@ -104,6 +104,7 @@ jobs:
           context: .
           file: docker/app.Dockerfile
           push: false
+          cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-app:buildcache
       - name: Free disk for GPU image
         if: steps.tools.outputs.changed == 'true'
         run: sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet
@@ -114,3 +115,4 @@ jobs:
           context: .
           file: docker/tools.Dockerfile
           push: false
+          cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-tools:buildcache

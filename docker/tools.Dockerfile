@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 # Ubuntu 24.04 ships ffmpeg 6.1; 22.04 has 4.4, whose concat demuxer lacks the
 # `option` directive SAM3 mask encoding uses.
 FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
@@ -14,14 +16,25 @@ RUN for i in 1 2 3; do \
 ENV UV_PYTHON_INSTALL_DIR=/opt/python
 RUN uv python install 3.12
 WORKDIR /app
-COPY pyproject.toml README.md ./
-COPY src/ src/
+# Layers run from least to most often changed, so a src/ edit only reruns the last
+# one (installing the editable audyssey package) and the torch venv stays cached.
+# The gpu project depends on the root package by path, so the root pyproject.toml
+# must be present for the lock check, but the package itself is installed later.
+# UV_COMPILE_BYTECODE: the unprivileged runtime user cannot write .pyc into the venv.
+ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_HTTP_TIMEOUT=600
+COPY pyproject.toml ./
 COPY gpu/pyproject.toml gpu/uv.lock gpu/.python-version gpu/
 # Several large git dependencies; GitHub sometimes drops one clone mid-transfer.
 # The cache mount keeps finished clones between retries and stays out of the image.
-ENV UV_LINK_MODE=copy
 RUN --mount=type=cache,target=/root/.cache/uv \
     for i in 1 2 3 4 5; do \
+      uv sync --project gpu --locked --no-dev --python 3.12 --no-install-package audyssey && exit 0; \
+      echo "uv sync attempt $i failed, retrying"; sleep 10; \
+    done; exit 1
+COPY README.md ./
+COPY src/ src/
+RUN --mount=type=cache,target=/root/.cache/uv \
+    for i in 1 2 3; do \
       uv sync --project gpu --locked --no-dev --python 3.12 && exit 0; \
       echo "uv sync attempt $i failed, retrying"; sleep 10; \
     done; exit 1
