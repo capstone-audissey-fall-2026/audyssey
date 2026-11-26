@@ -10,7 +10,9 @@ services:
       context: .
       dockerfile: docker/tools.Dockerfile
     # 이미지 기본 명령: 도구 4개를 real로 0.0.0.0:8700에 띄움 (토큰이 없으면 시작하지 않음)
-    ports: ["${AUDYSSEY_TOOLS_PORT:-8700}:8700"]
+    # 기본은 이 호스트의 loopback만. Docker가 공개한 포트는 ufw 같은 호스트 방화벽을 거치지 않으므로
+    # 다른 기기에서 직접 접속하려면 AUDYSSEY_TOOLS_BIND=0.0.0.0을 명시하고, 아니면 SSH 터널을 씁니다.
+    ports: ["${AUDYSSEY_TOOLS_BIND:-127.0.0.1}:${AUDYSSEY_TOOLS_PORT:-8700}:8700"]
     env_file: .env
     environment:
       HF_HOME: /hf

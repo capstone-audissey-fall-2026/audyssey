@@ -185,14 +185,16 @@ Pod에서는 tools 이미지 하나가 도구 4개(분리·Judge·그라운딩·
 ```bash
 # GPU 호스트: .env는 A-1과 같고, 아래 두 값을 정합니다 (AUDYSSEY_TOOL_TOKEN과 HF_CACHE도 필요)
 #   AUDYSSEY_TOOLS_GPU=<아무 프로세스도 없는 GPU 번호>   기본 0
-#   AUDYSSEY_TOOLS_PORT=<공개할 포트>                    기본 8700
+#   AUDYSSEY_TOOLS_PORT=<호스트 포트>                    기본 8700
+#   AUDYSSEY_TOOLS_BIND=<바인드 주소>                    기본 127.0.0.1 (이 호스트만)
 docker compose -f compose.tools.yaml up -d
 curl localhost:8700/health      # {"tools":["separation","filtering","grounding","generation"],"impl":"real"}
 docker compose -f compose.tools.yaml down   # 끝나면
 ```
 
-- 컨테이너 안에서는 `0.0.0.0:8700`으로 뜨고, 호스트에는 `AUDYSSEY_TOOLS_PORT`로 모든 인터페이스에 공개됩니다. 토큰(`AUDYSSEY_TOOL_TOKEN`)이 없으면 시작하지 않습니다.
-- 토큰은 평문 HTTP로 오갑니다. 같은 네트워크 밖에서 쓰면 방화벽으로 막거나, 노트북에서 `ssh -L 8700:localhost:8700 <서버>`를 열고 URL에 `http://localhost:8700`을 넣습니다.
+- 컨테이너 안에서는 `0.0.0.0:8700`으로 뜨고, 호스트에는 기본으로 `127.0.0.1:AUDYSSEY_TOOLS_PORT`에만 공개됩니다. 토큰(`AUDYSSEY_TOOL_TOKEN`)이 없으면 시작하지 않습니다.
+- 토큰은 평문 HTTP로 오가므로 노트북에서 `ssh -L 8700:localhost:8700 <서버>`를 열고 URL에 `http://localhost:8700`을 넣는 방식을 권합니다. 터널은 loopback만 있으면 됩니다.
+- `AUDYSSEY_TOOLS_BIND=0.0.0.0`(또는 특정 인터페이스 주소)으로 직접 공개할 수도 있지만, Docker가 공개한 포트는 `ufw` 같은 호스트 방화벽의 INPUT 규칙을 거치지 않아 방화벽으로 막을 수 없습니다. 신뢰하는 사설 네트워크에서만 쓰고, 그 밖에서는 TLS 프록시를 앞에 둡니다.
 - 노트북에서는 B-3 3~4번대로 화면 또는 `.env`에 이 주소와 같은 토큰을 넣습니다.
 - A의 전체 구성(`docker compose up`)과 함께 올리면 같은 모델이 GPU에 두 번 올라가므로 하나만 띄웁니다.
 
@@ -441,7 +443,7 @@ API의 `analyze()`와 Studio는 같은 `build_graph()`로 생성한 그래프를
 | `AUDYSSEY_REMOTE_TIMEOUT_S` | `600` | 원격 도구 호출 제한 시간(초) |
 | `AUDYSSEY_VISUAL_PROMPT` | `false` | 시각 힌트 사용. 켜면 계획 검증에서 SAM3 `locate`, 분리 전 `mask_video`를 실행하고 마스크 영상을 분리에 넣음 |
 
-화면의 **GPU tools**(`GET`·`POST /api/gpu-tools`)는 위의 도구 주소와 `AUDYSSEY_TOOL_TOKEN`을 앱 프로세스 안에서 덮어씁니다. 값은 메모리에만 있어서 앱을 다시 띄우면 사라지고 환경변수로 돌아갑니다. URL을 저장하면 도구 모드가 `stub`·`real`이어도 4개 모두 `remote`로 바뀌고(응답의 `remote`로 확인), 빈 URL을 저장하면 환경변수 설정으로 돌아갑니다. 토큰은 어떤 응답에도 나오지 않고(`token_set`만 반환) 브라우저에도 저장하지 않습니다. 새 환경변수는 없습니다. 도구만 띄우는 [`compose.tools.yaml`](../compose.tools.yaml)의 `AUDYSSEY_TOOLS_GPU`, `AUDYSSEY_TOOLS_PORT`는 Compose 변수입니다.
+화면의 **GPU tools**(`GET`·`POST /api/gpu-tools`)는 위의 도구 주소와 `AUDYSSEY_TOOL_TOKEN`을 앱 프로세스 안에서 덮어씁니다. 값은 메모리에만 있어서 앱을 다시 띄우면 사라지고 환경변수로 돌아갑니다. URL을 저장하면 도구 모드가 `stub`·`real`이어도 4개 모두 `remote`로 바뀌고(응답의 `remote`로 확인), 빈 URL을 저장하면 환경변수 설정으로 돌아갑니다. 토큰은 어떤 응답에도 나오지 않고(`token_set`만 반환) 브라우저에도 저장하지 않습니다. 새 환경변수는 없습니다. 도구만 띄우는 [`compose.tools.yaml`](../compose.tools.yaml)의 `AUDYSSEY_TOOLS_GPU`, `AUDYSSEY_TOOLS_PORT`, `AUDYSSEY_TOOLS_BIND`는 Compose 변수입니다.
 
 **플래너**
 
