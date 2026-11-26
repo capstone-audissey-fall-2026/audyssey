@@ -105,7 +105,7 @@ flowchart LR
 |---|---|
 | [플래너](src/audyssey/tools/planning/prompts.py) | 유음 영상 분리용 프롬프트에 실제로 들리는 소리, 고유명사 제외, 음향 특성에 따른 소스 분리·병합, 0.1초 단위 onset/offset 지침을 추가했습니다. |
 | [분리 그래프](src/audyssey/graph.py) · [도구 서버](src/audyssey/toolserver.py) | 검수 통과 소스의 첫 분리 요청을 묶습니다. Judge와 재시도는 소스별로 실행합니다. 배치 요청이 실패하면 개별 분리로 재시도합니다. |
-| [SAM Audio](src/audyssey/tools/separation/real.py) | 각 스팬을 양쪽 0.7초 확장하고 오디오 경계에서 자른 뒤, 겹치거나 맞닿는 구간을 합칩니다. 구간을 최대 4개씩 묶어 `description`만 넣고, 출력을 원래 시간축과 길이로 복원합니다. 스팬이 없으면 전체 음원을 사용합니다. 시각 마스크가 있는 소스는 기존 경로를 사용합니다. GPU 메모리 부족 시 배치를 나눠 재시도하며, 설정을 켜면 CUDA FP32 행렬곱에 TF32를 허용합니다. |
+| [SAM Audio](src/audyssey/tools/separation/real.py) | 각 스팬을 양쪽 0.7초 확장하고 오디오 경계에서 자른 뒤, 겹치거나 맞닿는 구간을 합칩니다. 구간을 최대 32개씩 묶어 `description`만 넣고, 출력을 원래 시간축과 길이로 복원합니다. 스팬이 없으면 전체 음원을 사용합니다. 시각 마스크가 있는 소스는 기존 경로를 사용합니다. GPU 메모리 부족 시 배치 크기를 절반으로 낮추고 같은 요청의 남은 구간에도 적용하며, 설정을 켜면 CUDA FP32 행렬곱에 TF32를 허용합니다. |
 
 검수기는 `main`의 입력·프롬프트·재계획 규칙을 따릅니다. 검수 모델 설정이 비어 있으면 Hydrogen을 상속하고, 분리 검수에는 기본적으로 오디오만 전달합니다.
 
@@ -119,7 +119,7 @@ AUDYSSEY_PLANNER_INPUT=video
 AUDYSSEY_PLANNER_VIDEO_AUDIO=true
 AUDYSSEY_PLANNER_STRICT_AUDIO=true
 AUDYSSEY_SAM_AUDIO_CROP_PADDING_S=0.7
-AUDYSSEY_SAM_AUDIO_BATCH_SIZE=4
+AUDYSSEY_SAM_AUDIO_BATCH_SIZE=32
 AUDYSSEY_SAM_AUDIO_ALLOW_TF32=true
 ```
 

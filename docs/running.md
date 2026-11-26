@@ -458,7 +458,7 @@ real 분리 검수는 오디오 근거를 요구합니다. 검수기에 오디�
 | `AUDYSSEY_SAM_AUDIO_IMAGEBIND_CHECKPOINT` | 빈 값 | 시각 힌트 소스의 후보 고르기용 ImageBind 파일. 비우면 쓰지 않음. Compose에서는 파일을 separation 컨테이너에 따로 마운트해야 함 |
 | `AUDYSSEY_SAM_AUDIO_PREDICT_SPANS` | `false` | 구간이 없을 때 모델이 구간을 예측 (span predictor를 GPU에 추가로 올림) |
 | `AUDYSSEY_SAM_AUDIO_CROP_PADDING_S` | 빈 값 | 초 단위 crop 여백 (0–5). 설정하면 시각 마스크가 없는 소스의 분리에 적용 |
-| `AUDYSSEY_SAM_AUDIO_BATCH_SIZE` | `1` | crop 분리의 GPU 호출당 최대 구간 수 (1–8). 원격 분리의 경우 앱과 분리 도구 서버에 설정 |
+| `AUDYSSEY_SAM_AUDIO_BATCH_SIZE` | `32` | crop 분리의 시작 배치 크기 (1–32). OOM 시 같은 요청에서 배치 크기를 줄여 유지. 원격 분리의 경우 앱과 분리 도구 서버에 설정 |
 | `AUDYSSEY_SAM_AUDIO_ALLOW_TF32` | `false` | SAM Audio가 CUDA에서 FP32 행렬곱을 실행할 때 TF32 허용 |
 | `AUDYSSEY_SAM3_MODEL` / `AUDYSSEY_SAM3_DEVICE` | `facebook/sam3.1` / `cuda` | 그라운딩 모델과 장치 (CUDA 전용) |
 | `AUDYSSEY_SAM3_TRACK_FPS` | `2` | 마스크 추적 fps. `0`이면 원본 fps (24GB GPU에서는 메모리 부족 위험) |

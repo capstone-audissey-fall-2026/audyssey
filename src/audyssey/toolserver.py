@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import Field, TypeAdapter, ValidationError
 
 from audyssey.contracts import FilterResult, GroundResult, SourcePlan, VisualHint
-from audyssey.settings import Settings
+from audyssey.settings import SAM_AUDIO_MAX_BATCH_SIZE, Settings
 from audyssey.uploads import save_upload
 
 # ponytail: one GPU model, one request at a time; add a queue or batching if throughput matters
@@ -80,7 +80,10 @@ def create_tool_app(
             ) -> Response:
                 try:
                     source_plans = TypeAdapter(
-                        Annotated[list[SourcePlan], Field(min_length=1, max_length=8)]
+                        Annotated[
+                            list[SourcePlan],
+                            Field(min_length=1, max_length=SAM_AUDIO_MAX_BATCH_SIZE),
+                        ]
                     ).validate_json(plans)
                 except ValidationError:
                     raise HTTPException(422, "invalid source plans") from None

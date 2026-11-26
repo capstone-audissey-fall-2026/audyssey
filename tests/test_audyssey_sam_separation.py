@@ -191,3 +191,33 @@ class SamSeparationTests(unittest.TestCase):
         self.assertEqual([call.args[0] for call in calls], ["high", "highest"] * 3)
         np.testing.assert_array_equal(read_wav(outs[0]), 1)
         np.testing.assert_array_equal(read_wav(outs[1]), 2)
+
+    def test_batch_starts_at_32_and_keeps_smaller_limit_for_later_crops(self):
+        class OutOfMemoryError(RuntimeError):
+            pass
+
+        self.torch.cuda = SimpleNamespace(
+            OutOfMemoryError=OutOfMemoryError, empty_cache=lambda: None
+        )
+        calls = []
+        plans = [
+            self.plan.model_copy(update={"description": str(index)})
+            for index in range(40)
+        ]
+        outs = [self.root / f"{index}.wav" for index in range(len(plans))]
+
+        def separate_impl(*args, **kwargs):
+            descriptions = self.processor.call_args.kwargs["descriptions"]
+            calls.append(len(descriptions))
+            if len(descriptions) > 8:
+                raise OutOfMemoryError()
+            return SimpleNamespace(
+                target=[Tensor(np.full(100, int(text))) for text in descriptions]
+            )
+
+        self.model.separate.side_effect = separate_impl
+        with patch.dict(os.environ, AUDYSSEY_SAM_AUDIO_CROP_PADDING_S="0.7"):
+            real.separate_batch(self.mono, plans, outs, 1)
+        self.assertEqual(calls, [32, 16, 8, 8, 8, 8, 8])
+        for index, out in enumerate(outs):
+            np.testing.assert_array_equal(read_wav(out), index)

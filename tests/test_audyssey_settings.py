@@ -97,7 +97,7 @@ class SettingsTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             legacy = Settings()
             self.assertIsNone(legacy.sam_audio_crop_padding_s)
-            self.assertEqual(legacy.sam_audio_batch_size, 1)
+            self.assertEqual(legacy.sam_audio_batch_size, 32)
             self.assertFalse(legacy.sam_audio_allow_tf32)
             self.assertFalse(legacy.planner_strict_audio)
             with patch.dict(

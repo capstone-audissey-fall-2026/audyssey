@@ -177,3 +177,26 @@ class ToolServerTests(unittest.TestCase):
             np.testing.assert_array_equal(read_wav(outs[0]), 0)
             np.testing.assert_array_equal(read_wav(outs[1]), 1)
             self.assertEqual(client.post("/separate_batch").status_code, 401)
+
+    def test_crop_batch_accepts_32_source_plans(self):
+        import json
+
+        files = {"mono": self.files["mono"]}
+        headers = {"Authorization": "Bearer t"}
+        plan = self.plan.model_dump(mode="json")
+
+        def separate_batch(mono, plans, outputs, attempt):
+            self.assertEqual(len(plans), 32)
+            for out in outputs:
+                out.write_bytes(b"wav")
+            return outputs
+
+        with patch.dict("os.environ", AUDYSSEY_SAM_AUDIO_CROP_PADDING_S="0.7"), patch(
+            "audyssey.tools.separation.real.separate_batch", separate_batch
+        ), TestClient(create_tool_app(["separation"], "real", "t")) as client:
+            for count, status in ((32, 200), (33, 422)):
+                response = client.post(
+                    "/separate_batch", files=files, headers=headers,
+                    data={"plans": json.dumps([plan] * count), "attempt": "1"},
+                )
+                self.assertEqual(response.status_code, status)

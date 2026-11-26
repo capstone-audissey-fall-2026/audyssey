@@ -116,23 +116,6 @@ def _windows(plan: SourcePlan, samples: int, padding: float) -> list[tuple[int, 
     return windows
 
 
-def _infer_crops(
-    settings: Settings, audios: list[np.ndarray], descriptions: list[str], attempt: int
-) -> list[np.ndarray]:
-    torch, _, _ = _load()
-    try:
-        return _infer(settings, audios, descriptions, attempt)
-    except torch.cuda.OutOfMemoryError:
-        if len(audios) == 1:
-            raise
-    # The failed call's frame has unwound, so unused GPU allocations can be released.
-    torch.cuda.empty_cache()
-    mid = len(audios) // 2
-    return _infer_crops(
-        settings, audios[:mid], descriptions[:mid], attempt
-    ) + _infer_crops(settings, audios[mid:], descriptions[mid:], attempt)
-
-
 def _crop_tracks(
     settings: Settings,
     mono: Path,
@@ -150,17 +133,32 @@ def _crop_tracks(
         )
         if start < end
     ]
-    for offset in range(0, len(jobs), settings.sam_audio_batch_size):
-        group = jobs[offset : offset + settings.sam_audio_batch_size]
-        targets = _infer_crops(
-            settings,
-            [audio[start:end] for _, start, end in group],
-            [plans[index].description for index, _, _ in group],
-            attempt,
-        )
-        for (index, start, end), target in zip(group, targets, strict=True):
-            length = min(end - start, len(target))
-            tracks[index][start : start + length] = target[:length]
+    if not jobs:
+        return tracks
+    torch, _, _ = _load()
+    batch_size = settings.sam_audio_batch_size
+    offset = 0
+    while offset < len(jobs):
+        group = jobs[offset : offset + batch_size]
+        try:
+            targets = _infer(
+                settings,
+                [audio[start:end] for _, start, end in group],
+                [plans[index].description for index, _, _ in group],
+                attempt,
+            )
+        except torch.cuda.OutOfMemoryError:
+            if len(group) == 1:
+                raise
+            batch_size = len(group) // 2
+        else:
+            for (index, start, end), target in zip(group, targets, strict=True):
+                length = min(end - start, len(target))
+                tracks[index][start : start + length] = target[:length]
+            offset += len(group)
+            continue
+        # The failed call's frame has unwound, so unused GPU allocations can be released.
+        torch.cuda.empty_cache()
     return tracks
 
 
