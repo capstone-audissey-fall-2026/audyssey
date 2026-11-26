@@ -3,10 +3,8 @@ import { exportUrl, listJobs, sendCommand, startJob, uploadVideo } from "./api";
 import OpenVideoDialog from "./components/OpenVideoDialog";
 import TopBar from "./components/TopBar";
 import VideoEditor from "./components/VideoEditor";
-import { errorText, useJob } from "./lib/useJob";
+import { errorText, jobIdFromHash, useJob } from "./lib/useJob";
 import type { Job, Method } from "./types";
-
-const hashId = () => decodeURIComponent(window.location.hash.slice(1)) || null;
 
 export default function App() {
   const { job, busy, error, follow, run, receive } = useJob();
@@ -19,7 +17,7 @@ export default function App() {
   // The job id lives in the URL hash, so a reload or a shared link opens the same job.
   useEffect(() => {
     const sync = () => {
-      const id = hashId();
+      const id = jobIdFromHash(window.location.hash);
       void follow(id);
       if (id === null) setDialogOpen(true);
     };

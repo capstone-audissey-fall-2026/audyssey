@@ -151,3 +151,19 @@ test("onTime reports seeks and can be unsubscribed", async (context) => {
   engine.seek(4);
   assert.deepEqual(seen, [2]);
 });
+
+test("onLoaded fires when a buffer finishes decoding, also for a load started earlier", async (context) => {
+  const { engine } = await engineWith(context);
+  let loaded = 0;
+  engine.onLoaded(() => (loaded += 1));
+  let release;
+  globalThis.fetch = () => new Promise((resolve) => (release = () => resolve({ arrayBuffer: async () => new ArrayBuffer(100) })));
+  const first = engine.setTracks([{ id: "a", url: "/a.wav" }]);
+  const second = engine.setTracks([{ id: "a", url: "/a.wav" }, { id: "b", url: null }]); // same url: no second fetch
+  release();
+  await first;
+  await second;
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(loaded, 1);
+  assert.ok(engine.peaks("a", 4));
+});

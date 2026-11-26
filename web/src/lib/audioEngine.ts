@@ -32,6 +32,7 @@ export class AudioEngine {
   private only: string | null = null;
   private mode: "edit" | "original" = "edit";
   private listeners = new Set<(t: number) => void>();
+  private loadedListeners = new Set<() => void>();
 
   constructor(readonly video: HTMLVideoElement, private ctx: BaseAudioContext = new AudioContext()) {
     this.master = ctx.createGain();
@@ -92,6 +93,7 @@ export class AudioEngine {
       if (entry.url !== url) return; // replaced or released while loading
       entry.buffer = buffer;
       this.restartIfPlaying();
+      for (const cb of this.loadedListeners) cb();
     } catch {
       // The lane keeps showing no waveform; playback goes on without this track.
     }
@@ -150,6 +152,12 @@ export class AudioEngine {
   onTime(cb: (t: number) => void): () => void {
     this.listeners.add(cb);
     return () => this.listeners.delete(cb);
+  }
+
+  // Called whenever a track's audio has finished decoding (waveforms can be drawn then).
+  onLoaded(cb: () => void): () => void {
+    this.loadedListeners.add(cb);
+    return () => this.loadedListeners.delete(cb);
   }
 
   play(): void {
@@ -249,6 +257,7 @@ export class AudioEngine {
     this.tracks.clear();
     this.master.disconnect();
     this.listeners.clear();
+    this.loadedListeners.clear();
     void (this.ctx as AudioContext).close?.();
   }
 }

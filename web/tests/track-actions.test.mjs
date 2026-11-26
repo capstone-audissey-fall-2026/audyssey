@@ -72,11 +72,22 @@ test("pitchCommands sets the pitch then renders; engineTracks keys audio by what
   });
   const plain = engineTracks(j, jobToView(j));
   assert.deepEqual(plain.map((t) => t.id), ["s1", "s2", "s3", "residual"]);
-  assert.equal(plain[0].url, "/api/jobs/abc123def/files/tracks/s1.wav?v=tracks%2Fs1.wav%7C2%7Cdone%7C0%7C");
+  assert.equal(plain[0].url, "/api/jobs/abc123def/files/tracks/s1.wav?v=tracks%2Fs1.wav%7C2%7Cdone%7C0%7C%7C0");
   assert.equal(plain[1].url.includes("tracks/s2.wav"), true); // no render yet: the unpitched stem
   assert.equal(plain[2].url, null);
   const rendered = job({ ...j, outputs: { mix_wav: "out/mix.wav", video_mp4: "out/video.mp4", stems: [] } });
   assert.match(engineTracks(rendered, jobToView(rendered))[1].url, /files\/out\/pitch_s2\.wav\?v=/);
   const noResidual = job({ ...j, residual: { path: null, keep: true, gain: 1 } });
   assert.deepEqual(engineTracks(noResidual, jobToView(noResidual)).map((t) => t.id), ["s1", "s2", "s3"]);
+});
+
+test("engineTracks urls change when the reload counter does, even if the file name does not", async (context) => {
+  const [{ engineTracks }, jobToView] = await load(context);
+  const j = job({ sources: [source("s1"), source("s2")] });
+  const view = jobToView(j);
+  const a = engineTracks(j, view, 0);
+  const b = engineTracks(j, view, 1);
+  assert.deepEqual(a, engineTracks(j, view));
+  assert.equal(a.length, 3);
+  a.forEach((t, i) => assert.notEqual(t.url, b[i].url, t.id));
 });

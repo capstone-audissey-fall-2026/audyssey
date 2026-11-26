@@ -14,7 +14,7 @@ export function clampSpan(s: Span, duration: number): Span {
 export function moveSpan(s: Span, delta: number, duration: number): Span {
   const length = s.end - s.start;
   const start = clamp(s.start + delta, 0, Math.max(0, duration - length));
-  return { start, end: start + length };
+  return { start, end: Math.min(start + length, duration) }; // rounding must not pass the end
 }
 
 // A resize keeps the other edge and at least MIN_SPAN of length.

@@ -37,6 +37,7 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
   const [solo, setSolo] = useState<string | null>(null);
   const [pending] = useState(() => new PendingEdits());
   const [, bump] = useReducer((n: number) => n + 1, 0);
+  const [reload, setReload] = useState(0);
   const [draft, setDraft] = useState<Span[] | null>(null);
   const disabled = regenerateBlockedReason(job, busy);
   const [lanes, setLanes] = useState<Lane[]>([]);
@@ -57,8 +58,12 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
 
   // The trace follows the job; a burst of updates is read once.
   useEffect(() => {
-    const timer = setTimeout(() => void getTrace(job.id).then(setTrace, () => {}), 200);
-    return () => clearTimeout(timer);
+    let current = true;
+    const timer = setTimeout(() => void getTrace(job.id).then((t) => current && setTrace(t), () => {}), 200);
+    return () => {
+      current = false;
+      clearTimeout(timer);
+    };
   }, [job.id, job.version]);
 
   useEffect(() => {
@@ -85,18 +90,16 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
   }, [engine, job.duration]);
 
   // Load what the tracks play; only a changed url is fetched again.
-  const tracks = engineTracks(job, view);
+  const tracks = engineTracks(job, view, reload);
   const tracksKey = JSON.stringify(tracks);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const stableTracks = useMemo(() => tracks, [tracksKey]);
   useEffect(() => {
     if (!engine) return;
-    let current = true;
-    void engine.setTracks(stableTracks).then(() => current && setAudioVersion((n) => n + 1));
-    return () => {
-      current = false;
-    };
+    void engine.setTracks(stableTracks);
   }, [engine, stableTracks]);
+  // Waveforms are drawn from decoded audio, whichever load finishes.
+  useEffect(() => engine?.onLoaded(() => setAudioVersion((n) => n + 1)), [engine]);
 
   // Keep switches and volumes apply at once, without a server round trip.
   const viewRef = useRef(view);
@@ -157,6 +160,8 @@ export default function VideoEditor({ job, busy, run, receive }: VideoEditorProp
       return last;
     });
     applyMix(); // after a failure the engine goes back to the saved mix
+    // These rewrite stems (and the residual) under the same file names, so load them again.
+    if (next && commands.some((c) => c.type === "reseparate" || c.type === "generate" || c.type === "add_source")) setReload((n) => n + 1);
     return next;
   };
 

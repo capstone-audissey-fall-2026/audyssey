@@ -57,18 +57,19 @@ export function regenerateBlockedReason(job: Job, busy: string | null): string |
 }
 
 // What the engine loads. The URL carries what the audio is made of, so a changed track is fetched again.
-export function engineTracks(job: Job, view: JobView): EngineTrack[] {
+// `reload` changes after a command that rewrites stems or the residual under the same file name.
+export function engineTracks(job: Job, view: JobView, reload = 0): EngineTrack[] {
   const url = (path: string, key: string) => `${fileUrl(job.id, path)}?v=${encodeURIComponent(key)}`;
   const tracks = view.rows.map((row): EngineTrack => {
     if (row.status !== "done" || !row.trackPath) return { id: row.id, url: null };
     // A pitched copy exists only after a render.
     const pitched = row.pitch !== 0 && job.outputs ? `out/pitch_${row.id}.wav` : null;
     const path = pitched ?? row.trackPath;
-    return { id: row.id, url: url(path, `${path}|${row.attempts}|${row.status}|${row.pitch}|${pitched ? job.version : ""}`) };
+    return { id: row.id, url: url(path, `${path}|${row.attempts}|${row.status}|${row.pitch}|${pitched ? job.version : ""}|${reload}`) };
   });
   if (view.residual) {
     // The residual is recomputed when any source is separated again.
-    tracks.push({ id: "residual", url: url(view.residual.path, `${view.residual.path}|${job.sources.map((s) => s.attempts).join(",")}`) });
+    tracks.push({ id: "residual", url: url(view.residual.path, `${view.residual.path}|${job.sources.map((s) => s.attempts).join(",")}|${reload}`) });
   }
   return tracks;
 }

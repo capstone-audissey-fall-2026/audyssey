@@ -92,3 +92,44 @@ test("run: one change at a time; a 409 says another change is running and clears
   assert.equal(await first, "done");
   assert.equal(ctl.busy, null);
 });
+
+test("a newer job message clears a stale error; only a busy 409 is shown as another change", async (context) => {
+  const { ctl, ApiError } = await controller(context, { a: job({ id: "a", version: 1 }) });
+  await ctl.follow("a");
+  await ctl.run("Adding", async () => {
+    throw new ApiError(409, "job is busy");
+  });
+  assert.equal(ctl.error, "Another change is still running.");
+  ctl.receive(job({ id: "a", version: 2 }));
+  assert.equal(ctl.error, null);
+  await ctl.run("start", async () => {
+    throw new ApiError(409, "job has already started");
+  });
+  assert.equal(ctl.error, "job has already started");
+});
+
+test("a finished run of an earlier visit does not clear the busy flag of a newer run", async (context) => {
+  const { ctl } = await controller(context, { a: job({ id: "a" }), b: job({ id: "b" }) });
+  await ctl.follow("a");
+  let releaseOld;
+  const old = ctl.run("Old", () => new Promise((resolve) => (releaseOld = resolve)));
+  await ctl.follow("b");
+  await ctl.follow("a");
+  let releaseNew;
+  const fresh = ctl.run("New", () => new Promise((resolve) => (releaseNew = resolve)));
+  releaseOld();
+  await old;
+  assert.equal(ctl.busy, "New");
+  releaseNew();
+  await fresh;
+  assert.equal(ctl.busy, null);
+});
+
+test("jobIdFromHash survives a malformed hash", async (context) => {
+  const server = await ssr(context);
+  const { jobIdFromHash } = await server.ssrLoadModule("/src/lib/useJob.ts");
+  assert.equal(jobIdFromHash("#abc123"), "abc123");
+  assert.equal(jobIdFromHash(""), null);
+  assert.equal(jobIdFromHash("#"), null);
+  assert.equal(jobIdFromHash("#%E0%A4%A"), null);
+});

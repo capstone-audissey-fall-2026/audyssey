@@ -4,9 +4,18 @@ import type { Job } from "../types";
 import { errorDetail } from "./errors";
 
 export function errorText(error: unknown): string {
-  if (error instanceof ApiError && error.status === 409) return "Another change is still running.";
+  if (error instanceof ApiError && error.status === 409 && error.detail === "job is busy") return "Another change is still running.";
   if (error instanceof TypeError) return "Could not reach the server. Check that it is running, then try again.";
   return errorDetail(error);
+}
+
+// The job id in a URL hash, or null (also for a hash that is not valid percent-encoding).
+export function jobIdFromHash(hash: string): string | null {
+  try {
+    return decodeURIComponent(hash.replace(/^#/, "")) || null;
+  } catch {
+    return null;
+  }
 }
 
 interface Snapshot { job: Job | null; busy: string | null; error: string | null }
@@ -19,6 +28,7 @@ export class JobController {
   error: string | null = null;
   snapshot: Snapshot = { job: null, busy: null, error: null };
   private id: string | null = null;
+  private runToken = 0;
   private events: EventSource | null = null;
   private listeners = new Set<() => void>();
 
@@ -37,6 +47,8 @@ export class JobController {
   receive = (incoming: Job): void => {
     if (incoming.id !== this.id) return;
     if (this.job && incoming.version < this.job.version) return;
+    // A newer state of the job replaces an old failure message.
+    if (this.job && incoming.version > this.job.version) this.error = null;
     this.job = incoming;
     this.emit();
   };
@@ -45,6 +57,7 @@ export class JobController {
     this.events?.close();
     this.events = null;
     this.id = id;
+    this.runToken++; // a change still running on the old job no longer reports here
     this.job = null;
     this.busy = null;
     this.error = null;
@@ -70,17 +83,17 @@ export class JobController {
 
   run = async <T>(label: string, fn: () => Promise<T>): Promise<T | undefined> => {
     if (this.busy !== null) return undefined;
-    const id = this.id;
+    const token = ++this.runToken;
     this.busy = label;
     this.error = null;
     this.emit();
     try {
       return await fn();
     } catch (error) {
-      if (this.id === id) this.error = errorText(error);
+      if (this.runToken === token) this.error = errorText(error);
       return undefined;
     } finally {
-      if (this.id === id) {
+      if (this.runToken === token) {
         this.busy = null;
         this.emit();
       }
