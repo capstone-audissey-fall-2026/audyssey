@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi import Body, FastAPI, HTTPException, Request, UploadFile
 import httpx
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from audyssey import trace
 from audyssey.contracts import (
@@ -33,12 +34,14 @@ def create_app(
     settings: Settings | None = None,
     tools: Tools | None = None,
     router: Callable[[str, Job], Routed] | None = None,
+    webui_dir: Path | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     route = router or load_router(settings)
     ctx = Context(tools or load_tools(settings), settings, JobStore(settings.work_dir))
     app = FastAPI()
     app.state.ctx = ctx
+    webui = webui_dir or Path(str(files("audyssey") / "webui"))
     locks: dict[str, Lock] = {}
     jobs: dict[str, Job] = {}
     app.state.locks, app.state.jobs = locks, jobs
@@ -255,11 +258,22 @@ def create_app(
             },
         )
 
-    @app.get("/")
-    def root() -> HTMLResponse:
+    def legacy_ui() -> HTMLResponse:
         return HTMLResponse(
             (files("audyssey.ui") / "index.html").read_text(encoding="utf-8")
         )
+
+    built = (webui / "index.html").is_file()
+    if built:
+        app.mount("/assets", StaticFiles(directory=webui / "assets"), name="assets")
+
+    @app.get("/")
+    def root() -> Response:
+        if built:
+            return FileResponse(webui / "index.html")
+        return legacy_ui()
+
+    app.get("/legacy")(legacy_ui)
 
     @app.get("/dev")
     def dev() -> HTMLResponse:

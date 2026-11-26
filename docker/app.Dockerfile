@@ -1,3 +1,11 @@
+FROM node:22-bookworm-slim AS frontend
+WORKDIR /app/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+# vite.config.ts writes to ../src/audyssey/webui, i.e. /app/src/audyssey/webui
+RUN npm run build
+
 FROM python:3.13-slim
 COPY --from=ghcr.io/astral-sh/uv:0.11.14 /uv /usr/local/bin/uv
 # Debian mirrors sometimes drop connections; retry each file and the whole install.
@@ -9,6 +17,7 @@ RUN for i in 1 2 3; do \
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ src/
+COPY --from=frontend /app/src/audyssey/webui src/audyssey/webui
 RUN uv sync --locked --no-dev --extra ui --extra llm
 ENV PATH="/app/.venv/bin:$PATH"
 # Run as an unprivileged user; jobs are written under /app/work (named volume).

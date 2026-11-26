@@ -11,6 +11,7 @@ on:
       - uv.lock
       - gpu/**
       - docker/**
+      - web/**
       - .github/workflows/publish-images.yaml
   workflow_dispatch:
 
