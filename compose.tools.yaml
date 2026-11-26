@@ -1,5 +1,5 @@
 # GPU 호스트에서 도구 4개(분리, Judge, 그라운딩, 생성)만 한 컨테이너로 띄웁니다.
-# main(화면)은 다른 기기에서 돌리고 화면의 "GPU tools"나 .env로 연결합니다 (docs/running.md B).
+# main(화면)은 다른 기기에서 돌리고 화면의 "GPU tools"나 .env로 연결합니다 (docs/running.md#3-로컬-app--원격-gpu-tools).
 #   docker compose -f compose.tools.yaml up -d
 name: audyssey-tools
 
