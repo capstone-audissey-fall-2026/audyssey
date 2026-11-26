@@ -400,7 +400,12 @@ API의 `analyze()`와 Studio는 같은 `build_graph()`로 생성한 그래프를
 |---|---|---|
 | `AUDYSSEY_PLANNER` | `stub` | `stub` 또는 `real` (Compose 기본 `real`) |
 | `AUDYSSEY_ROUTER` | `stub` | `stub`, `real` 또는 `hybrid`. 자연어 편집 요청을 명령으로 바꾸는 라우터 |
-| `AUDYSSEY_SEPARATOR` / `AUDYSSEY_FILTER` / `AUDYSSEY_GROUNDER` | `stub` | `stub`, `real`, `remote` (Compose 기본 `remote`) |
+| `AUDYSSEY_SEPARATOR` / `AUDYSSEY_FILTER` / `AUDYSSEY_GROUNDER` | `stub` | `stub`, `real`, `remote` (Compose 기본 `remote`). `AUDYSSEY_FILTER`만 `agent`도 가능: 3단계 스템 필터 에이전트([filtering_agent.md](filtering_agent.md)) |
+| `AUDYSSEY_STEM_AGENT_URL` | 빈 값 | filter=agent의 판정 모델 서버(OpenAI 호환, 예: vLLM `/v1`). agent인데 비어 있으면 시작할 때 오류 |
+| `AUDYSSEY_STEM_AGENT_MODEL` | `Qwen/Qwen3-Omni-30B-A3B-Instruct` | filter=agent의 판정 모델 이름 |
+| `AUDYSSEY_STEM_AGENT_API_KEY` | 빈 값 | filter=agent 판정 서버 키 (vLLM은 보통 비움) |
+| `AUDYSSEY_STEM_AGENT_CONFIG` | 빈 값 | filter=agent 임계값·단계 설정 JSON 경로. 비우면 검증된 기본값 |
+| `AUDYSSEY_STEM_AGENT_TIMEOUT_S` | `120` | filter=agent 판정 요청 하나의 제한 시간(초) |
 | `AUDYSSEY_SEPARATOR_URL` / `AUDYSSEY_FILTER_URL` / `AUDYSSEY_GROUNDING_URL` | 빈 값 | remote 도구 서버 주소. remote인데 비어 있으면 시작할 때 오류 |
 | `AUDYSSEY_TOOL_TOKEN` | 빈 값 | 도구 서버 Bearer 토큰. main과 도구 서버에 같은 값 |
 | `AUDYSSEY_REMOTE_TIMEOUT_S` | `600` | 원격 도구 호출 제한 시간(초) |

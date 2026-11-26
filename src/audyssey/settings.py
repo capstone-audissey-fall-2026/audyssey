@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     planner: Literal["stub", "real"] = "stub"
     router: Literal["stub", "real", "hybrid"] = "stub"
     separator: Literal["stub", "real", "remote"] = "stub"
-    filter: Literal["stub", "real", "remote"] = "stub"
+    filter: Literal["stub", "real", "remote", "agent"] = "stub"
     grounder: Literal["stub", "real", "remote"] = "stub"
     grounding_url: str = ""
     generator: Literal["stub", "real", "remote"] = "stub"
@@ -119,6 +119,14 @@ class Settings(BaseSettings):
     sam_audio_clap_checkpoint: str = ""
     sam_audio_imagebind_checkpoint: str = ""
     judge_pass_threshold: float = 0.5
+    # filter=agent: the 3-stage stem filter judged by an audio LLM (Qwen3-Omni) on an
+    # OpenAI-compatible server; docs/filtering_agent.md.
+    stem_agent_url: str = ""
+    stem_agent_model: str = "Qwen/Qwen3-Omni-30B-A3B-Instruct"
+    stem_agent_api_key: str = Field(default="", repr=False)
+    # Optional JSON file with the agent's own thresholds and stage options.
+    stem_agent_config: str = ""
+    stem_agent_timeout_s: float = Field(default=120, gt=0)
 
     def planner_endpoint(self) -> LLMEndpoint:
         return LLMEndpoint(

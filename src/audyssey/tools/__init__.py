@@ -38,6 +38,10 @@ def judge_verdict(result: FilterResult, threshold: float) -> FilterResult:
         )
     passed = overall >= threshold
     reason = "" if passed else f"judge overall {overall:.2f} < {threshold}"
+    # Keep the tool's own explanation (e.g. which stage failed) unless it is only a
+    # restatement of its own threshold check.
+    if reason and result.reason and not result.reason.startswith("judge overall"):
+        reason = f"{reason}: {result.reason}"
     return result.model_copy(update={"passed": passed, "reason": reason})
 
 
@@ -68,6 +72,8 @@ def load_tools(settings: Settings) -> Tools:
     ]:
         if mode == "remote" and not url.strip():
             raise ValueError(f"AUDYSSEY_{name}_URL is required for remote mode")
+    if settings.filter == "agent" and not settings.stem_agent_url.strip():
+        raise ValueError("AUDYSSEY_STEM_AGENT_URL is required for filter=agent")
     planning = import_module(f"audyssey.tools.planning.{settings.planner}")
     separation = import_module(f"audyssey.tools.separation.{settings.separator}")
     filtering = import_module(f"audyssey.tools.filtering.{settings.filter}")
