@@ -93,7 +93,8 @@ jobs:
           fetch-depth: 0
       # Everything the tools image installs or copies. Any src/ change counts: gpu/ installs the
       # root package editable, so any of it can break the tools runtime. With the registry cache
-      # and deps-first layers, a src-only change only reruns the last install layer.
+      # and deps-first layers, a src-only change only rebuilds the last COPY layer, but the smoke
+      # stage runs inside the image, so it still downloads the cached venv layers (about 7 GB).
       - name: Does this change touch the tools image?
         id: tools
         env:
