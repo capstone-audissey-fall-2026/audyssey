@@ -16,35 +16,33 @@ RUN for i in 1 2 3; do \
 ENV UV_PYTHON_INSTALL_DIR=/opt/python
 RUN uv python install 3.12
 WORKDIR /app
-# Layers run from least to most often changed, so a src/ edit only reruns the last
-# one (installing the editable audyssey package) and the torch venv stays cached.
-# The gpu project depends on the root package by path, so the root pyproject.toml
-# must be present for the lock check, but the package itself is installed later.
+# Run as an unprivileged user. The HF cache is mounted read-only; triton keeps its
+# compile cache under the user's home. Created before the venv and src/ so that no RUN
+# follows the src/ COPY.
+RUN useradd --create-home --uid 10001 app
+# Layers run from least to most often changed. src/ is the last real layer and is a
+# COPY --link with no RUN after it, so a src/ edit rebuilds only that layer and a
+# registry cache never has to download the torch venv to produce it.
 # UV_COMPILE_BYTECODE: the unprivileged runtime user cannot write .pyc into the venv.
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_HTTP_TIMEOUT=600
 COPY pyproject.toml ./
 COPY gpu/pyproject.toml gpu/uv.lock gpu/.python-version gpu/
+# The gpu project installs the root package editable (a .pth pointing at /app/src). Its
+# build only needs the metadata files and an importable package, so an empty skeleton
+# stands in; the real src/ is copied on top below.
+RUN mkdir -p src/audyssey && touch src/audyssey/__init__.py README.md
 # Several large git dependencies; GitHub sometimes drops one clone mid-transfer.
 # The cache mount keeps finished clones between retries and stays out of the image.
 RUN --mount=type=cache,target=/root/.cache/uv \
     for i in 1 2 3 4 5; do \
-      uv sync --project gpu --locked --no-dev --python 3.12 --no-install-package audyssey && exit 0; \
-      echo "uv sync attempt $i failed, retrying"; sleep 10; \
-    done; exit 1
-COPY README.md ./
-COPY src/ src/
-RUN --mount=type=cache,target=/root/.cache/uv \
-    for i in 1 2 3; do \
       uv sync --project gpu --locked --no-dev --python 3.12 && exit 0; \
       echo "uv sync attempt $i failed, retrying"; sleep 10; \
     done; exit 1
+COPY --link src/ src/
 ENV PATH="/app/gpu/.venv/bin:$PATH" HF_HOME=/hf HF_HUB_OFFLINE=1 CUDA_VISIBLE_DEVICES=0 \
     PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 # torchcodec cu128 needs NVIDIA NPP from the nvidia-npp-cu12 wheel at load time.
 ENV LD_LIBRARY_PATH="/app/gpu/.venv/lib/python3.12/site-packages/nvidia/npp/lib:$LD_LIBRARY_PATH"
-# Run as an unprivileged user. The HF cache is mounted read-only; triton keeps its
-# compile cache under the user's home.
-RUN useradd --create-home --uid 10001 app
 USER app
 EXPOSE 8700
 CMD ["audyssey", "tool-server", "--tool", "separation", "--tool", "filtering", "--tool", "grounding", "--tool", "generation", "--impl", "real", "--host", "0.0.0.0", "--port", "8700"]
