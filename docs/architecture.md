@@ -1,37 +1,96 @@
 # 구조 상세
 
-[README](../README.md)의 처리 흐름과 서버 구성 그림을 보충하는 문서입니다. 설계 원문은
+처리 흐름, 서버 구성, 용어, 계약, API를 정리한 문서입니다. 설계 원문은
 [docs/superpowers/specs/2026-11-09-audyssey-skeleton-design.md](superpowers/specs/2026-11-09-audyssey-skeleton-design.md)에 있습니다.
 
+## 처리 흐름
+
+```mermaid
+flowchart TD
+  UP["영상 업로드"] --> PRE["전처리<br/>오디오 추출 · 유음/무음 판정"]
+  PRE --> PLAN["플래닝<br/>소리 목록과 설명 작성"]
+  PLAN --> CHECK{"플래닝 검증"}
+  CHECK -. "재시도" .-> PLAN
+  CHECK --> MODE{"원본 오디오"}
+
+  MODE -- "있음 (유음)" --> SEP
+  MODE -- "없음 (무음), 대사 제외" --> GEN
+
+  subgraph SEPARATE["분리 · 소스마다"]
+    SEP["분리"] --> JUDGE{"분리 검증"}
+    JUDGE -. "재시도" .-> SEP
+  end
+
+  subgraph GENERATE["생성 · 소스마다"]
+    GEN["생성"] --> SCORE{"생성 채점"}
+    SCORE -. "재시도" .-> GEN
+  end
+
+  JUDGE --> RES["나머지 소리 계산<br/>원본 − 분리 트랙"]
+  RES --> TL["타임라인 편집<br/>켜기/끄기 · 음량 · 피치"]
+  SCORE --> TL
+  TL == "사용자 요청: 생성으로 바꾸기 · 소스 추가" ==> GEN
+  TL == "사용자 요청: 다시 분리 · 소스 추가 (유음만)" ==> SEP
+  TL -- "합치기" --> OUT["편집된 영상 · 믹스 · 트랙별 오디오"]
+```
+
+- 유음 영상은 분리를 기본으로 하고, 생성은 사용자가 요청할 때만 실행합니다. 분리 트랙을 생성으로 바꾸면 원래 트랙은 꺼진 채로 남아 다시 켤 수 있습니다.
+- 무음 영상은 생성만 지원합니다. 대사는 생성하지 않습니다.
+- 나머지 소리(residual)는 원본에서 분리 트랙만 빼서 계산합니다. 생성 트랙은 원본에서 나온 소리가 아니므로 계산에 포함하지 않습니다.
+- 처리 순서는 코드에 고정되어 있습니다(LangGraph). 업로드하면 전처리까지만 하고, 사용자가 분리 시작 또는 생성 시작을 누르면 타임라인까지 진행합니다(무음 영상은 생성만). 이후 편집은 사용자가 명령을 보내 실행합니다.
+- 플래닝·검수는 분리(실제 오디오 근거)와 생성(장면 적합성)을 구분합니다. 검수 오류·판정 보류를 통과로 처리하지 않으며, 재시도 한도 뒤에도 검증되지 않은 소스는 경고와 함께 건너뜁니다. 영어 프롬프트, 문맥 구간 설정, 합성 대조 평가는 [계획과 검수 개선](planning.md)을 참고합니다.
+
 ## 서버 구성
+
+```mermaid
+flowchart LR
+  UI["브라우저"] -- "HTTP :8600" --> MAIN
+  subgraph MAIN["main 서버 (audyssey-app, GPU 불필요)"]
+    GRAPH["처리 흐름 · 명령 처리"] --- STORE[("작업 파일")]
+  end
+  MAIN -- "LLM API" --> LLM["플래너·검수기 LLM<br/>Gemini, OpenRouter 또는 vLLM"]
+  MAIN -- "HTTP + 토큰 :8700" --> TOOLS
+  subgraph TOOLS["도구 서버 (audyssey-tools, GPU)"]
+    T1["분리<br/>SAM Audio"]
+    T2["분리 검증<br/>SAM Audio Judge"]
+    T3["그라운딩<br/>SAM3.1"]
+    T4["생성 · 채점<br/>internal model · CLAP"]
+  end
+  TOOLS -. "읽기 전용" .-> HF[("모델 가중치 캐시")]
+```
+
+- main 서버는 GPU를 사용하지 않으며, 모델은 도구 서버와 플래너 LLM을 API로 호출합니다.
+- 도구 서버 이미지 하나에 GPU 도구 네 가지가 모두 들어 있습니다. `compose.yaml`은 도구별 컨테이너로, RunPod Pod와 `compose.tools.yaml`은 컨테이너 하나로 실행합니다.
+- 각 도구는 `stub`(가짜), `real`(직접 실행), `remote`(다른 서버 호출) 중에서 고를 수 있어, 담당 모듈만 실제 모델로 실행하고 나머지는 stub으로 둘 수 있습니다.
+- 그라운딩(시각 힌트)은 기본으로 꺼져 있습니다.
 
 | 구성 | 하는 일 | 실행 환경 |
 |---|---|---|
 | main 서버 | 흐름 실행, 명령 처리, 작업 저장, 화면. GPU를 쓰지 않음 | `audyssey-app` 이미지 (Python 3.13) |
-| 도구 서버 | SAM Audio(분리), Judge(평가), SAM3(위치 찾기)를 HTTP로 제공 | `audyssey-tools` 이미지 (CUDA 12.8, Python 3.12) |
-| 플래너 LLM | 소스 계획과 계획 검증. 주소만 바꾸면 Gemini와 vLLM을 오갈 수 있음 | Gemini API 또는 vLLM 서버 |
+| 도구 서버 | SAM Audio(분리), Judge(평가), SAM3(위치 찾기), 생성·채점을 HTTP로 제공 | `audyssey-tools` 이미지 (CUDA 12.8, Python 3.12) |
+| 플래너 LLM | 소스 계획과 계획 검증. 주소만 바꾸면 Gemini, OpenRouter, vLLM을 오갈 수 있음 | API 또는 vLLM 서버 |
 
-도구마다 실행 방식을 고릅니다.
-
-- `stub`: 가짜 결과. GPU 없이 흐름을 확인할 때
-- `real`: 같은 프로세스에서 모델 실행
-- `remote`: 다른 서버에 띄운 도구 서버를 HTTP로 호출
-
-배포 방식은 두 가지입니다. Compose는 도구마다 컨테이너를 띄우고, RunPod는 Pod 1개에서 도구 3개를 함께 띄웁니다.
+실행 방식은 세 가지입니다([실행 방법](running.md)).
 
 ```mermaid
 flowchart TB
-  subgraph B["GPU 서버 한 대: docker compose up"]
+  subgraph A["1. GPU 없이 stub"]
+    A1["main + stub 도구<br/>uv run audyssey serve"]
+  end
+  subgraph B["2. GPU 서버 한 대: docker compose up"]
     B1["main"] --> B2["separation"]
     B1 --> B3["judge"]
     B1 --> B4["grounding"]
+    B1 --> B6["generation"]
     B1 --> B5["vllm"]
   end
-  subgraph C["노트북 + RunPod"]
-    C1["노트북: docker compose up main"] -- "HTTPS :8700" --> C2["RunPod Pod 1개<br/>tools 이미지 기본 CMD<br/>분리 · Judge · 그라운딩"]
+  subgraph C["3. 로컬 app + 원격 GPU tools"]
+    C1["내 컴퓨터: main"] -- "HTTP(S) :8700<br/>화면 GPU tools 또는 .env" --> C2["RunPod Pod 또는 compose.tools.yaml<br/>tools 이미지 기본 CMD, 도구 4개"]
     C1 -- "OpenAI 호환 API" --> C3["Gemini API"]
   end
 ```
+
+화면의 **GPU tools**(`/api/gpu-tools`)는 실행 중인 main 프로세스의 도구 주소와 토큰을 바꿔 4개 도구를 모두 한 도구 서버(remote)로 연결합니다. 값은 메모리에만 남고 환경변수보다 우선합니다.
 
 ## 용어
 
@@ -122,6 +181,8 @@ GET  /api/jobs/{id}/files/{path}  작업 폴더의 오디오·영상·파형 파
 GET  /api/jobs/{id}/trace         단계별 모델 호출 기록 (입력, 프롬프트, 보낸 프레임·클립, 응답, 걸린 시간)
 GET  /api/jobs/{id}/export        합친 영상, 믹스, stem을 묶은 zip (합치기 전이면 409)
 GET  /api/system                  서버별로 어떤 단계와 모델이 도는지, 응답하는지
+GET  /api/gpu-tools               {tools_url, token_set, remote} (토큰은 돌려주지 않음)
+POST /api/gpu-tools               {tools_url, token?} → 같은 형식 | 409(작업 실행 중) | 422(http(s) URL이 아님)
 ```
 
 호출 기록은 작업 폴더의 `trace.jsonl`에 쌓이고, 호출이 주고받은 파일은 `trace/<호출 id>/`에 복사됩니다. 재시도가 트랙을 덮어써도 각 시도의 결과를 들어 볼 수 있습니다.
@@ -165,7 +226,8 @@ src/audyssey/
     editing/     render.py                   residual, pitch, render
 gpu/             GPU 도구 전용 uv 프로젝트 (Python 3.12, numpy 1.26, torch cu128)
 docker/          app.Dockerfile, tools.Dockerfile
-compose.yaml     main + separation + judge + grounding + vllm
+compose.yaml     main + separation + judge + grounding + generation + vllm
+compose.tools.yaml  GPU 호스트에서 도구 4개만 컨테이너 1개로
 tests/           unittest (GPU 코드는 가짜 torch/sam_audio로 검사)
 ```
 
