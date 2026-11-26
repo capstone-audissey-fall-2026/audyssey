@@ -2,8 +2,9 @@ name: publish-images
 on:
   push:
     branches: [main]
-    # Only what the Dockerfiles copy (README.md too, but only as package metadata);
-    # docs, tests, Compose and CI-only changes keep the current images.
+    # Only what the Dockerfiles use: src/, pyproject.toml, uv.lock, gpu/ and web/
+    # (README.md is replaced by an empty stub, so it is not listed); docs, tests,
+    # Compose and CI-only changes keep the current images.
     # Add a path here when a Dockerfile starts copying it.
     paths:
       - src/**
