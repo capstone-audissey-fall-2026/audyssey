@@ -54,13 +54,16 @@ def render(job: Job, job_dir: Path, include_residual_stem: bool) -> RenderOutput
     mix = np.zeros_like(read_wav(job_dir / job.audio_path), dtype=np.float64)
     stems: list[str] = []
     for source in job.sources:
-        if not source.keep or source.track_path is None:
+        if source.track_path is None:
             continue
         path = job_dir / source.track_path
         if source.pitch_semitones:
+            # Also for dropped sources: the UI plays this copy when soloed or kept again.
             path = shift_pitch(
                 path, out / f"pitch_{source.id}.wav", source.pitch_semitones
             )
+        if not source.keep:
+            continue
         data = read_wav(path) * source.gain
         stem = write_wav(stems_dir / f"{source.id}.wav", data)
         stems.append(stem.relative_to(job_dir).as_posix())

@@ -5,6 +5,8 @@
 **/.venv
 **/__pycache__
 .ruff_cache
+.pytest_cache
+.mypy_cache
 .env
 .env.*
 !.env.example
@@ -12,6 +14,12 @@ work
 samples
 tests
 docs
+evals
+scripts
 *.pt
 *.pth
 *.safetensors
+web/node_modules
+web/dist
+# built in the Dockerfile's frontend stage; a local build must not change the src/ layer
+src/audyssey/webui

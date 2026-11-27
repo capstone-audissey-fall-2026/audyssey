@@ -2,8 +2,9 @@ name: publish-images
 on:
   push:
     branches: [main]
-    # Only what the Dockerfiles copy (README.md too, but only as package metadata);
-    # docs, tests, Compose and CI-only changes keep the current images.
+    # Only what the Dockerfiles use: src/, pyproject.toml, uv.lock, gpu/ and web/
+    # (README.md is replaced by an empty stub, so it is not listed); docs, tests,
+    # Compose and CI-only changes keep the current images.
     # Add a path here when a Dockerfile starts copying it.
     paths:
       - src/**
@@ -11,12 +12,20 @@ on:
       - uv.lock
       - gpu/**
       - docker/**
+      - web/**
       - .github/workflows/publish-images.yaml
   workflow_dispatch:
 
 permissions:
   contents: read
   packages: write
+
+# One publish at a time: two runs started by back-to-back merges both missed the cache and
+# raced for `latest`. A new run waits for the current one; GitHub keeps only the newest
+# waiting run, so an in-between merge may get no SHA tag (pin the newest published SHA).
+concurrency:
+  group: publish-images
+  cancel-in-progress: false
 
 jobs:
   publish:
@@ -35,6 +44,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # Layer cache in the registry (like v2a_inspect): a run rebuilds only the layers
+      # whose inputs changed. The buildcache tag is a cache manifest, not a runnable image.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -43,3 +54,5 @@ jobs:
           tags: |
             ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:latest
             ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-${{ matrix.image }}:buildcache,mode=max,compression=zstd,compression-level=3,force-compression=true

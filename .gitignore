@@ -152,6 +152,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!/web/src/lib/
 lib64/
 parts/
 sdist/
@@ -304,6 +305,9 @@ cython_debug/
 .omx/
 .agents/
 *.json
+!/web/package.json
+!/web/package-lock.json
+!/web/tsconfig.json
 !/langgraph.json
 !/src/audyssey/tools/routing/descriptions.json
 !/evals/routing/fixtures/*.json
@@ -326,3 +330,7 @@ data/
 # Audyssey local job media and generated tracks
 /work/jobs/
 /evals/routing/cache/
+
+# Web app
+web/node_modules/
+/src/audyssey/webui/

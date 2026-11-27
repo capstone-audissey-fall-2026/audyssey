@@ -1,5 +1,44 @@
 import httpx
 
+from audyssey.settings import Settings
+
+# Connection set from the UI: one tools server for all four tools. Process-wide, because
+# the remote clients read their settings on every call. ponytail: one app per process.
+_override = ("", "")
+
+
+def set_override(url: str, token: str) -> None:
+    global _override
+    _override = (url, token)
+
+
+def override() -> tuple[str, str]:
+    return _override
+
+
+def with_override(settings: Settings) -> Settings:
+    """Settings with the UI connection applied: all four tools remote at one URL."""
+    url, token = _override
+    if not url:
+        return settings
+    update = {
+        "separator": "remote",
+        "separator_url": url,
+        "filter": "remote",
+        "filter_url": url,
+        "grounder": "remote",
+        "grounding_url": url,
+        "generator": "remote",
+        "generator_url": url,
+    }
+    if token:
+        update["tool_token"] = token
+    return settings.model_copy(update=update)
+
+
+def remote_settings() -> Settings:
+    return with_override(Settings())
+
 
 def post(
     url: str,

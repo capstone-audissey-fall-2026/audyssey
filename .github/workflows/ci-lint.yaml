@@ -12,72 +12,95 @@ jobs:
     runs-on: ubuntu-slim
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # Caches uv's package downloads (keyed on uv.lock), not the venv: a cached venv points at
+      # a Python that the next runner may not have, so uv would delete it and start over.
       - name: Install UV
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.11.14"
-
-      - name: venv cache
-        id: sca_data_venv_cache
-        uses: actions/cache@v4
-        with:
-          key: cache-key-${{ hashFiles('pyproject.toml', 'uv.lock') }}
-          path: |
-            ./.venv
+          enable-cache: true
+          cache-dependency-glob: uv.lock
 
       - name: Sync venv
-        if: ${{ steps.venv-cache.outputs.cache-hit != 'true' }}
-        run: |
-          uv sync --dev --locked --extra ui --extra llm
+        run: uv sync --dev --locked --extra ui --extra llm
 
       - name: lint
         run: |
-          uv run ruff check --exit-non-zero-on-fix --no-cache --output-format github src/
+          uv run --no-sync ruff check --exit-non-zero-on-fix --no-cache --output-format github src/
 
       - name: format
         run: |
-          uv run ruff format --check --no-cache --output-format github src/
+          uv run --no-sync ruff format --check --no-cache --output-format github src/
 
       - name: type-check
         run: |
-          uv run ty check --output-format github --error-on-warning src/
+          uv run --no-sync ty check --output-format github --error-on-warning src/
 
       - name: install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: unit-tests
         run: |
-          uv run python -m unittest discover tests
+          uv run --no-sync python -m unittest discover tests
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
 
   numpy-1x:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Install UV
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           version: "0.11.14"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+          cache-suffix: numpy-1x
       - name: Install ffmpeg
         run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - name: Test Python 3.12 with numpy 1.26
         run: uv run --isolated --no-project --python 3.12 --with-editable '.[ui,llm]' --with 'numpy==1.26.4' python -m unittest discover tests
 
-  # Builds the images without pushing, so a broken Dockerfile or dependency fails
-  # the PR instead of the publish after merge. The 23 GB tools image only builds
-  # when its inputs change.
+  # Proves that the images main will publish still run, without pushing and without writing
+  # the registry cache (a PR must not overwrite main's cache). Layers come read-only from the
+  # cache the publish workflow writes. Both images are built from the same Dockerfiles as publish.
+  # - app (small): loaded into Docker and started as it ships (uid 10001, its own CMD).
+  # - tools (23 GB): not loaded, because exporting it needs a second 23 GB on the runner. The
+  #   Dockerfile's smoke stage runs the checks inside the build instead (docker/tools_smoke.py).
+  #   The stub implementation stands in for the real one because the runner has no GPU.
   docker-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      # Everything the tools image installs or copies. Any src/ change counts: gpu/ installs the
+      # root package editable, so any of it can break the tools runtime. With the registry cache
+      # and deps-first layers, a src-only change only rebuilds the last COPY layer, but the smoke
+      # stage runs inside the image, so it still downloads the cached venv layers (about 7 GB).
       - name: Does this change touch the tools image?
         id: tools
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          base=${{ github.event.pull_request.base.sha || github.event.before }}
-          if git diff --name-only "$base" HEAD | grep -qE '^(docker/tools\.Dockerfile|gpu/|src/audyssey/tools/|src/audyssey/toolserver\.py|pyproject\.toml|uv\.lock)'; then
+          if git diff --name-only "$BASE" HEAD | grep -qE '^(docker/tools[._]|gpu/|src/|pyproject\.toml$|uv\.lock$|\.github/workflows/ci-lint\.yaml$)'; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
       - uses: docker/setup-buildx-action@v3
@@ -86,14 +109,33 @@ jobs:
         with:
           context: .
           file: docker/app.Dockerfile
-          push: false
+          load: true
+          tags: audyssey-app:ci
+          cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-app:buildcache
+      - name: Smoke-test app image
+        run: |
+          docker run -d --name app -p 8600:8600 audyssey-app:ci
+          test "$(docker exec app id -u)" = 10001
+          # The app has no /health route; /api/jobs answers once the server is up.
+          curl -fsS --retry 30 --retry-delay 1 --retry-all-errors -o /dev/null localhost:8600/api/jobs
+          test "$(curl -fsS -o /dev/null -w '%{content_type}' localhost:8600/api/jobs)" = application/json
+          # Without the built web UI the app falls back to the legacy page, which has no /assets.
+          curl -fsS localhost:8600/ -o index.html
+          asset=$(grep -oE '/assets/[^"]+' index.html | sed -n 1p)
+          test -n "$asset"
+          curl -fsS -o /dev/null "localhost:8600$asset"
+      - name: App container logs
+        if: failure()
+        run: docker logs app
       - name: Free disk for GPU image
         if: steps.tools.outputs.changed == 'true'
         run: sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet
-      - name: Build tools image
+      - name: Build tools image and smoke-test it
         if: steps.tools.outputs.changed == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/tools.Dockerfile
-          push: false
+          target: smoke
+          outputs: type=cacheonly
+          cache-from: type=registry,ref=ghcr.io/capstone-audissey-fall-2026/audyssey-tools:buildcache
