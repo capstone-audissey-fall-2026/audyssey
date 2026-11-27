@@ -7,6 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Api = Literal["openai", "gemini", "openrouter"]
 Input = Literal["frames", "video"]
+SAM_AUDIO_MAX_BATCH_SIZE = 32
 
 
 class LLMEndpoint(BaseModel):
@@ -113,6 +114,8 @@ class Settings(BaseSettings):
     sam_audio_device: str = "cuda"
     sam_audio_reranking_candidates: int = Field(default=1, ge=1)
     sam_audio_predict_spans: bool = False
+    sam_audio_batch_size: int = Field(default=1, ge=1, le=SAM_AUDIO_MAX_BATCH_SIZE)
+    sam_audio_allow_tf32: bool = False
     # Reranking (candidates > 1) only: CLAP and ImageBind checkpoint files. Empty CLAP
     # uses the cached lukewys/laion_clap 630k-best.pt; empty ImageBind disables the
     # visual ranker, so masked videos fall back to the text rankers (CLAP + Judge).

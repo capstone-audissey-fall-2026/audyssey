@@ -363,6 +363,8 @@ real 분리 검수는 오디오를 듣는 검수기(오디오를 지원하는 �
 | `AUDYSSEY_SAM_AUDIO_CLAP_CHECKPOINT` | 빈 값 | 후보 고르기용 CLAP 파일. 비우면 캐시의 `lukewys/laion_clap` 630k-best |
 | `AUDYSSEY_SAM_AUDIO_IMAGEBIND_CHECKPOINT` | 빈 값 | 시각 힌트 소스의 후보 고르기용 ImageBind 파일. 비우면 쓰지 않음. Compose에서는 파일을 separation 컨테이너에 따로 마운트해야 함 |
 | `AUDYSSEY_SAM_AUDIO_PREDICT_SPANS` | `false` | 구간이 없을 때 모델이 구간을 예측 (span predictor를 GPU에 추가로 올림) |
+| `AUDYSSEY_SAM_AUDIO_BATCH_SIZE` | `1` | 분리 요청당 최대 소스 수 (1–32). CUDA OOM 시 같은 요청에서는 줄어든 크기를 유지. 원격 분리는 앱과 도구 서버에 설정 |
+| `AUDYSSEY_SAM_AUDIO_ALLOW_TF32` | `false` | SAM Audio의 CUDA FP32 행렬곱에 TF32 허용 |
 | `AUDYSSEY_SAM3_MODEL` / `AUDYSSEY_SAM3_DEVICE` | `facebook/sam3.1` / `cuda` | 그라운딩 모델과 장치 (CUDA 전용) |
 | `AUDYSSEY_SAM3_TRACK_FPS` | `2` | 마스크 추적 fps. `0`이면 원본 fps (24GB GPU에서는 메모리 부족 위험) |
 

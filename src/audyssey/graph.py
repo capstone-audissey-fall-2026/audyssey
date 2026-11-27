@@ -1,4 +1,5 @@
 import json
+import logging
 from collections.abc import Callable
 from functools import wraps
 from pathlib import Path
@@ -33,6 +34,9 @@ from audyssey.store import JobStore
 from audyssey.tools import Tools, load_tools
 from audyssey.tools.planning import planning_scope
 from audyssey.tools.editing.render import compute_residual, render
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -199,7 +203,9 @@ def generate_source(job: Job, source: Source, ctx: Context) -> None:
     ctx.store.save(job)
 
 
-def process_source(job: Job, source: Source, ctx: Context) -> None:
+def process_source(
+    job: Job, source: Source, ctx: Context, *, first_track: Path | None = None
+) -> None:
     if job.silent or source.origin == "generated":
         generate_source(job, source, ctx)
         return
@@ -210,34 +216,37 @@ def process_source(job: Job, source: Source, ctx: Context) -> None:
     try:
         while True:
             source.attempts += 1
-            update_step(
-                job,
-                ctx,
-                StepStatus(
-                    key=f"separate:{source.id}",
-                    status="running",
-                    round=source.attempts,
-                    max_rounds=maximum,
-                ),
-            )
-            hint = source.plan.visual_hint if ctx.settings.visual_prompt else None
-            if hint is None:
-                video = None
-            elif hint != masked_for:
-                # Masking runs SAM3 over the whole clip; reuse it while the hint holds.
-                video = ctx.tools.mask_video(
-                    directory / job.video_path,
-                    hint,
-                    directory / f"masks/{source.id}.mp4",
+            if first_track is not None:
+                path, first_track = first_track, None
+            else:
+                update_step(
+                    job,
+                    ctx,
+                    StepStatus(
+                        key=f"separate:{source.id}",
+                        status="running",
+                        round=source.attempts,
+                        max_rounds=maximum,
+                    ),
                 )
-                masked_for = hint
-            path = ctx.tools.separate(
-                directory / job.mono_path,
-                source.plan,
-                video,
-                directory / f"tracks/{source.id}.wav",
-                source.attempts,
-            )
+                hint = source.plan.visual_hint if ctx.settings.visual_prompt else None
+                if hint is None:
+                    video = None
+                elif hint != masked_for:
+                    # Masking runs SAM3 over the whole clip; reuse it while the hint holds.
+                    video = ctx.tools.mask_video(
+                        directory / job.video_path,
+                        hint,
+                        directory / f"masks/{source.id}.mp4",
+                    )
+                    masked_for = hint
+                path = ctx.tools.separate(
+                    directory / job.mono_path,
+                    source.plan,
+                    video,
+                    directory / f"tracks/{source.id}.wav",
+                    source.attempts,
+                )
             source.track_path = path.relative_to(directory).as_posix()
             update_step(
                 job,
@@ -301,6 +310,45 @@ def process_source(job: Job, source: Source, ctx: Context) -> None:
             ),
         )
     ctx.store.save(job)
+
+
+def process_separation_batch(job: Job, sources: list[Source], ctx: Context) -> None:
+    batch = ctx.tools.separate_batch
+    if batch is None or len(sources) < 2:
+        for source in sources:
+            process_source(job, source, ctx)
+        return
+
+    directory = ctx.store.dir(job.id)
+    outs = [directory / f"tracks/{source.id}.wav" for source in sources]
+    for source in sources:
+        source.status = "running"
+        update_step(
+            job,
+            ctx,
+            StepStatus(
+                key=f"separate:{source.id}",
+                status="running",
+                round=source.attempts + 1,
+                max_rounds=ctx.settings.max_separation_retries + 1,
+            ),
+        )
+    trace.set_step("separate")
+    try:
+        paths = batch(directory / job.mono_path, [s.plan for s in sources], outs, 1)
+        if paths != outs:
+            raise RuntimeError("unexpected output paths from separation batch")
+    except Exception as exc:
+        # A failed request must not prevent the other sources from being separated.
+        logger.warning(
+            "SAM Audio batch failed (%s); retrying individually", type(exc).__name__
+        )
+        for source in sources:
+            process_source(job, source, ctx)
+        return
+
+    for source, path in zip(sources, paths, strict=True):
+        process_source(job, source, ctx, first_track=path)
 
 
 INFO_KINDS = {"not_validated"}
@@ -561,7 +609,9 @@ def build_graph(
     def separate(state: AnalysisState) -> dict:
         job = state.job
         ctx = job_context(job)
-        # ponytail: sequential per-source loop, fan out with Send when real GPU tools need parallelism
+        batch_size = ctx.settings.sam_audio_batch_size
+        batch_enabled = batch_size > 1 and ctx.tools.separate_batch is not None
+        pending: list[Source] = []
         for source in job.sources:
             unresolved = [
                 issue
@@ -583,7 +633,22 @@ def build_graph(
                     ),
                 )
                 continue
+            if (
+                batch_enabled
+                and not job.silent
+                and source.origin == "separated"
+                and source.attempts == 0
+                and not (ctx.settings.visual_prompt and source.plan.visual_hint)
+            ):
+                pending.append(source)
+                if len(pending) == batch_size:
+                    process_separation_batch(job, pending, ctx)
+                    pending.clear()
+                continue
+            process_separation_batch(job, pending, ctx)
+            pending.clear()
             process_source(job, source, ctx)
+        process_separation_batch(job, pending, ctx)
         return {"job": job}
 
     def residual(state: AnalysisState) -> dict:
