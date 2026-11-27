@@ -27,7 +27,7 @@ class SamJudgeTests(unittest.TestCase):
         )
         self.batch.to.return_value = {'input_values': 'input', 'separated_values': 'separated', 'input_ids': 'text'}
         self.model.return_value = SimpleNamespace(
-            overall=Tensor([[0.7]]), recall=Tensor([[0.8]]), precision=Tensor([[0.6]]), faithfulness=None
+            overall=Tensor([[3.7]]), recall=Tensor([[0.8]]), precision=Tensor([[0.6]]), faithfulness=None
         )
         env = patch.dict(os.environ, {'AUDYSSEY_SAM_AUDIO_DEVICE': 'cpu'}, clear=True)
         env.start()
@@ -45,14 +45,14 @@ class SamJudgeTests(unittest.TestCase):
     def test_judge_maps_scores_and_threshold(self):
         result = self.judge()
         self.assertTrue(result.passed)
-        self.assertEqual(result.scores, {'overall': 0.7, 'recall': 0.8, 'precision': 0.6})
+        self.assertEqual(result.scores, {'overall': 3.7, 'recall': 0.8, 'precision': 0.6})
         self.assertEqual(result.reason, '')
         self.assertIsNone(result.suggestion)
         self.model.return_value.overall = Tensor([[0.3]])
         result = self.judge()
         self.assertFalse(result.passed)
         self.assertIn('0.30', result.reason)
-        self.assertIn('0.5', result.reason)
+        self.assertIn('3.0', result.reason)
         self.assertIsNone(result.suggestion)
         with patch.dict(os.environ, AUDYSSEY_JUDGE_PASS_THRESHOLD='0.3'):
             self.assertTrue(self.judge().passed)

@@ -56,14 +56,14 @@ class AppThresholdRetryTests(unittest.TestCase):
         return graph.analyze(job, ctx, method=method), settings
 
     def test_separation_retries_until_the_app_threshold_or_max(self):
-        # The stub judge scores 0.9 and passes it itself.
-        job, settings = self.run_job("separate", judge_pass_threshold=0.95)
+        # The stub judge scores 4.5 and passes it itself.
+        job, settings = self.run_job("separate", judge_pass_threshold=4.95)
         self.assertEqual(job.state, "ready", job.error)
         maximum = settings.max_separation_retries + 1
         for source in job.sources:
             self.assertEqual(source.attempts, maximum)
             self.assertFalse(source.filter.passed)
-            self.assertEqual(source.filter.reason, "judge overall 0.90 < 0.95")
+            self.assertEqual(source.filter.reason, "judge overall 4.50 < 4.95")
 
     def test_generation_score_uses_the_app_threshold(self):
         from audyssey.tools.planning import stub as planning
