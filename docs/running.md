@@ -347,7 +347,7 @@ real 분리 검수는 오디오를 듣는 검수기(오디오를 지원하는 �
 |---|---|---|
 | `AUDYSSEY_MAX_PLAN_ROUNDS` | `2` | 플래닝 최대 횟수 |
 | `AUDYSSEY_MAX_SEPARATION_RETRIES` | `2` | 소스마다 다시 분리하는 횟수 (총 시도 = 1 + 이 값) |
-| `AUDYSSEY_JUDGE_PASS_THRESHOLD` | `0.5` | Judge overall 합격 기준 (보정 전). 앱이 판정 서버가 돌려준 점수로 판정하므로 **앱의 값**이 쓰임 |
+| `AUDYSSEY_JUDGE_PASS_THRESHOLD` | `3.0` | Judge overall 합격 기준(점수는 1~5). 실측으로 정한 값이며 [보정 기록](status.md#judge-합격-기준-보정-2026-11-27)에 있음. 앱이 판정 서버가 돌려준 점수로 판정하므로 **앱의 값**이 쓰임 |
 | `AUDYSSEY_MAX_DURATION_S` | `30` | 업로드 영상 길이 상한(초) |
 | `AUDYSSEY_MAX_UPLOAD_MB` | `200` | 업로드 파일 크기 상한. main과 도구 서버 모두 적용, 넘으면 413 |
 | `AUDYSSEY_WORK_DIR` | `work/jobs` | 작업 폴더 |

@@ -20,6 +20,7 @@ class SettingsTests(unittest.TestCase):
             ),
             (2, 2, 30),
         )
+        self.assertEqual(settings.judge_pass_threshold, 3.0)
 
     def test_router_defaults_to_stub_and_reads_env(self):
         self.assertEqual(Settings().router, "stub")

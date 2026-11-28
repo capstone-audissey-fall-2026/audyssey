@@ -13,5 +13,5 @@ def judge(mono: Path, track: Path, plan: SourcePlan) -> FilterResult:
             ),
         )
     return FilterResult(
-        passed=True, scores={"overall": 0.9, "recall": 0.9, "precision": 0.9}
+        passed=True, scores={"overall": 4.5, "recall": 4.5, "precision": 4.5}
     )

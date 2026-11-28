@@ -118,7 +118,8 @@ class Settings(BaseSettings):
     # visual ranker, so masked videos fall back to the text rankers (CLAP + Judge).
     sam_audio_clap_checkpoint: str = ""
     sam_audio_imagebind_checkpoint: str = ""
-    judge_pass_threshold: float = 0.5
+    # Judge overall is ~1-5: planner-described stems scored 3.83-4.76, wrong descriptions 1.30-1.80.
+    judge_pass_threshold: float = 3.0
 
     def planner_endpoint(self) -> LLMEndpoint:
         return LLMEndpoint(
